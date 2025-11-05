@@ -1155,7 +1155,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
     processed_image_ids = set()
 
     # Check if any prediction file exists to attempt resuming
-    if args.eval and any(os.path.isfile(p) for p in prediction_cache_paths.values()):
+    if any(os.path.isfile(p) for p in prediction_cache_paths.values()):
         print(f"Attempting to resume from cached predictions for {dataset_path}")
     
         for eval_type, path in prediction_cache_paths.items():

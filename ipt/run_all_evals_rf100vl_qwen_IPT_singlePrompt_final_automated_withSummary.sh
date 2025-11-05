@@ -9,7 +9,7 @@ WORKDIR="/scratch/ggare/Research/VLMattributeClassifier"
 
 # CUDA_VISIBLE_DEVICES=0 python ipt/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1
 RESULTSDIR="results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS"
-CMD_TEMPLATE="rb; python ipt/run_bench_singleclass_IPT.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
+CMD_TEMPLATE="rb; python ipt/run_bench_singleclass_IPT.py --model_name Qwen2.5-VL-7B-Instruct --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
 # # CUDA_VISIBLE_DEVICES=0 /data3/shared/scripts/vnice/vnice.sh python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_flashAtt2.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_flashAtt2 --vqa_batch_size 1
 # RESULTSDIR="results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_fixDetectScale"

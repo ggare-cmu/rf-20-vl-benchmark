@@ -1,5 +1,5 @@
 '''
-Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1  --dataset_path wb-prova
+Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_IPT.py --model_name Qwen2.5-VL-7B-Instruct --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1 --dataset_path wb-prova
 '''
 
 import os
@@ -1214,8 +1214,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
         all(os.path.isfile(p) for p in prediction_cache_paths.values())
     )
 
-    # if args.eval and all_predictions_exist:
-    if args.eval and all_predictions_exist and not args.ipt_mode:
+    if all_predictions_exist and not args.ipt_mode:
         print(f"Using cached predictions for {dataset_path}")
         detections_all_by_type = {}
         for eval_type, path in prediction_cache_paths.items():
