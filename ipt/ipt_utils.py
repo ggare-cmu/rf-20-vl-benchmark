@@ -38,7 +38,8 @@ def load_qwen_model(model_name):
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
         )
-        print("Loading using AutoModelForImageTextToText")
+        
+        # print("Loading using AutoModelForImageTextToText")
         # model = AutoModelForImageTextToText.from_pretrained(
         #                 f"Qwen/{model_name}",
         #                 # trust_remote_code=True,
