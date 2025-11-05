@@ -65,7 +65,8 @@ def load_qwen_model(model_name):
     )
     elif(model_name.startswith("Qwen3-VL-235B")):
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+            # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+            "Qwen/"+model_name, torch_dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
         ) 
     elif(model_name.startswith("Qwen3-VL")):
         model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -146,64 +147,6 @@ def draw_colored_bboxes_on_image(image, color, bboxes):
     return img_copy
 
 
-
-def draw_bboxes_with_labels_on_image(image, pred_detections, gt_anns, cat_id2name_dict, font_size=None):
-    """
-    Draws predicted bboxes (red) and ground-truth bboxes (green) on the image.
-    Returns a new PIL image with the boxes drawn.
-    Bboxes should be [x, y, w, h] in image coordinates.
-    """
-    img_copy = image.copy()
-
-    if font_size is None:
-        # Dynamically set font size based on image height
-        font_size = max(15, int(image.height * 0.04))
-
-    draw = ImageDraw.Draw(img_copy)
-    
-    try:
-        # font_path = "arial.ttf"
-        font_path = "DejaVuSans.ttf"
-        font = ImageFont.truetype(font_path, font_size)
-    except IOError:
-        print(f"Warning: Font '{font_path}' not found. Loading default font.")
-        # The default font does not support a size parameter, so we can't resize it.
-        # The text will be small if the default font is used.
-        font = ImageFont.load_default() 
-
-    # GT in green
-    # for (x, y, w, h) in gt_bboxes:
-    for ann in gt_anns:
-        bbox = ann["bbox"]
-        gt_label = cat_id2name_dict[ann["category_id"]]
-        
-        x, y, w, h = bbox
-        draw.rectangle([(x, y), (x + w, y + h)], outline="green", width=8)
-
-        # Add label text for GT
-        # text_position = (x, y + font_size*0.01 + 2) if y > (font_size*0.01 + 20) else (x, y - h - 20)
-        # text_position = (x, y - font_size*0.01 - 50)
-        text_position = (x, y - font_size*1.1)
-        # text_position = (x, y - 20) if y > 20 else (x, y + 20)
-        draw.text(text_position, gt_label, fill="green", font=font)
-        
-    # Pred in red
-    # for (x, y, w, h) in pred_bboxes:
-    for det in pred_detections:
-        bbox = det["bbox"]
-        pred_label = det["category_name"]
-        score = det["score"]
-
-        x, y, w, h = bbox
-        draw.rectangle([(x, y), (x + w, y + h)], outline="red", width=8)
-
-        # Add label text
-        label_text = f"{pred_label} ({score:.2f})"
-        text_position = (x, y + h - font_size*0.01 - 2) if y > (font_size*0.01 + 2) else (x, y + h + 2)
-        # text_position = (x, y + h - 20) if y >  20 else (x, y + h + 20)
-        draw.text(text_position, label_text, fill="red", font=font)
-
-    return img_copy
 
 def visualize_bboxes(image_path, pred_bboxes, gt_bboxes, save_path):
     """
