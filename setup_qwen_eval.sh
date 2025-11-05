@@ -79,4 +79,8 @@ python download_data_roboflow.py --data_dir datasets/
 echo "===making dir for result==="
 mkdir -p results
 
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate qwen-eval-env
+echo "Active Conda environment: $CONDA_DEFAULT_ENV"
+
 echo "===script successful!!! ======"
