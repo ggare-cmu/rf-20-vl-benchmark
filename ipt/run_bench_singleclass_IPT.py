@@ -52,32 +52,41 @@ def set_seed_from_state(seed_state):
         torch.cuda.set_rng_state_all(seed_state['torch_cuda_random_state'])
 
 
+
 def load_qwen_model(model_name):
     
    
     model = None
-    if(model_name.startswith("Qwen2.5-VL")):
-         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    if(model_name.startswith("Qwen2.5-VL")): 
+        print("Loading using Qwen2_5_VLForConditionalGeneration")
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         "Qwen/"+model_name,
-        torch_dtype= torch.bfloat16,
+        dtype= torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map="auto"
     )
     elif(model_name.startswith("Qwen3-VL-235B")):
+        print("Loading using Qwen3VLMoeForConditionalGeneration")
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
             # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-            "Qwen/"+model_name, torch_dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
+            "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
         ) 
     elif(model_name.startswith("Qwen3-VL")):
+        print("Loading using Qwen3VLForConditionalGeneration")
         model = Qwen3VLForConditionalGeneration.from_pretrained(
-            "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+            "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
         )
     else:
         print("Error: Invalid model name")
         return None, None
 
+
+    print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
+
     processor = AutoProcessor.from_pretrained("Qwen/"+model_name)
     model.eval()
+
+
 
     print("processor.tokenizer.padding_side:", processor.tokenizer.padding_side)
     print("processor.tokenizer.pad_token:", processor.tokenizer.pad_token)
