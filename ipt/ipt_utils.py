@@ -30,7 +30,7 @@ def load_qwen_model(model_name):
     #         "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
     #     ) 
     elif(model_name.startswith("Qwen3-VL")):
-        print("Loading using Qwen3VLForConditionalGeneration")
+        print("Loading using AutoModelForImageTextToText")
         # model = Qwen3VLForConditionalGeneration.from_pretrained(
         #     "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
         # )
