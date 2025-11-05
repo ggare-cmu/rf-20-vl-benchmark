@@ -73,8 +73,8 @@ echo "===exporting roboflow key==="
 export ROBOFLOW_API_KEY=$api_key
 
 echo "=== Downloading the data ==="
-mkdir -p datasets
-python download_data_roboflow.py --data_dir datasets/
+mkdir -p datasets/rf100-vl-fsod
+python download_data_roboflow.py --data_dir datasets/rf100-vl-fsod
 
 echo "===making dir for result==="
 mkdir -p results
