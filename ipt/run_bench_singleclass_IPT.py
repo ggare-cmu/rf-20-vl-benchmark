@@ -2349,7 +2349,11 @@ def run_single_dataset_evaluation(args):
     torch.cuda.empty_cache()
     gc.collect()
 
+
+    print("\n\n" + "=" * 60)
     print(f"Starting the final evaluation with the new refined class definitions...")
+    print("\n\n" + "=" * 60)
+
     args.data_instr_path = os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions")
     args.output_dir = os.path.join(args.output_dir, f"final_instruction_eval")
     evaluator.run_single_dataset_evaluation(args)
@@ -2358,7 +2362,7 @@ def run_single_dataset_evaluation(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name')
+    parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name e.g., Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct]')
     parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
     parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
