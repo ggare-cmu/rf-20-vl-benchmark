@@ -2248,9 +2248,9 @@ def run_single_dataset_evaluation(args):
     gc.collect()
 
 
-    print("\n\n" + "=" * 60)
+    print("\n\n" + "*" * 60 + "\n")
     print(f"Starting the final evaluation with the new refined class definitions...")
-    print("\n\n" + "=" * 60)
+    print("\n" + "*" * 60 + "\n\n")
 
     args.data_instr_path = os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions")
     args.output_dir = os.path.join(args.output_dir, f"final_instruction_eval")
