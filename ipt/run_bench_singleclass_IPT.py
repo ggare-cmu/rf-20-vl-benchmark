@@ -2315,16 +2315,16 @@ def run_single_dataset_evaluation(args):
     Runs evaluation for a single dataset. This function is called by the dispatcher.
     """
 
-    if args.dataset_path:
-        root_dir = "./datasets/rf100-vl-fsod/"
-        if not os.path.isdir(root_dir):
-            print(f"Root directory not found: {root_dir}")
-            return
-        
-        args.dataset_path = os.path.join(root_dir, args.dataset_path)
+    
+    root_dir = "./datasets/rf100-vl-fsod/"
+    if not os.path.isdir(root_dir):
+        print(f"Root directory not found: {root_dir}")
+        return
+    
+    dataset_path = os.path.join(root_dir, args.dataset_path)
 
-    if not args.dataset_path or not os.path.isdir(args.dataset_path):
-        print(f"Error: Invalid or missing --dataset_path: {args.dataset_path}")
+    if not dataset_path or not os.path.isdir(dataset_path):
+        print(f"Error: Invalid or missing --dataset_path: {dataset_path}")
         return
 
     # Set seed for reproducibility
@@ -2338,7 +2338,7 @@ def run_single_dataset_evaluation(args):
     model, processor = load_qwen_model(args.model_name)
 
     print("=" * 60)
-    print(f"Evaluating dataset: {args.dataset_path}")
+    print(f"Evaluating dataset: {dataset_path}")
 
     
     # Run the iterative prompt refinement process
@@ -2346,9 +2346,15 @@ def run_single_dataset_evaluation(args):
         args,
         model=model,
         processor=processor,
-        dataset_path=args.dataset_path,
+        dataset_path=dataset_path,
         num_iterations=args.num_ipt_iterations
     )
+
+
+    # After use free up memory:
+    del model
+    torch.cuda.empty_cache()
+    gc.collect()
 
     print(f"Starting the final evaluation with the new refined class definitions...")
     args.data_instr_path = os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions")

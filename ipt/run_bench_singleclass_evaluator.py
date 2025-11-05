@@ -1290,16 +1290,15 @@ def run_single_dataset_evaluation(args):
     Runs evaluation for a single dataset. This function is called by the dispatcher.
     """
 
-    if args.dataset_path:
-        root_dir = "./datasets/rf100-vl-fsod/"
-        if not os.path.isdir(root_dir):
-            print(f"Root directory not found: {root_dir}")
-            return
-        
-        args.dataset_path = os.path.join(root_dir, args.dataset_path)
+    root_dir = "./datasets/rf100-vl-fsod/"
+    if not os.path.isdir(root_dir):
+        print(f"Root directory not found: {root_dir}")
+        return
+    
+    dataset_path = os.path.join(root_dir, args.dataset_path)
 
-    if not args.dataset_path or not os.path.isdir(args.dataset_path):
-        print(f"Error: Invalid or missing --dataset_path: {args.dataset_path}")
+    if not dataset_path or not os.path.isdir(dataset_path):
+        print(f"Error: Invalid or missing --dataset_path: {dataset_path}")
         return
 
     run_modes = []
@@ -1325,9 +1324,9 @@ def run_single_dataset_evaluation(args):
     model, processor = load_qwen_model(args.model_name)
 
     print("=" * 60)
-    print(f"Evaluating dataset: {args.dataset_path}")
+    print(f"Evaluating dataset: {dataset_path}")
 
-    eval_generator = evaluate_dataset(args, model, processor, args.dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir)
+    eval_generator = evaluate_dataset(args, model, processor, dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir)
 
 
     # Collect live results yielded by the generator and save them to disk periodically
@@ -1342,7 +1341,7 @@ def run_single_dataset_evaluation(args):
         pretty JSON by reading the master JSONL.
         """
         try:
-            dataset_basename = os.path.basename(args.dataset_path.rstrip('/'))
+            dataset_basename = os.path.basename(dataset_path.rstrip('/'))
             save_dir = os.path.join(args.output_dir, "live_results", run_name)
             os.makedirs(save_dir, exist_ok=True)
 
@@ -1424,19 +1423,19 @@ def run_single_dataset_evaluation(args):
     if ds_stats is not None:
         # Print summary of results
         print("\n--- Summary of Results ---")
-        print(f"[orig_no_nms] mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats['orig_no_nms'][0]:.4f}")
-        print(f"[orig_with_nms] mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats['orig_with_nms'][0]:.4f}")
-        print(f"[vqa_no_nms] mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats['vqa_no_nms'][0]:.4f}")
-        print(f"[vqa_with_nms] mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats['vqa_with_nms'][0]:.4f}")
+        print(f"[orig_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][0]:.4f}")
+        print(f"[orig_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][0]:.4f}")
+        print(f"[vqa_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][0]:.4f}")
+        print(f"[vqa_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][0]:.4f}")
 
         #AR@1
-        print(f"[orig_no_nms] AR@1 for {os.path.basename(args.dataset_path)}: {ds_stats['orig_no_nms'][6]:.4f}")
-        print(f"[orig_with_nms] AR@1 for {os.path.basename(args.dataset_path)}: {ds_stats['orig_with_nms'][6]:.4f}")
-        print(f"[vqa_no_nms] AR@1 for {os.path.basename(args.dataset_path)}: {ds_stats['vqa_no_nms'][6]:.4f}")
-        print(f"[vqa_with_nms] AR@1 for {os.path.basename(args.dataset_path)}: {ds_stats['vqa_with_nms'][6]:.4f}")
+        print(f"[orig_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][6]:.4f}")
+        print(f"[orig_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][6]:.4f}")
+        print(f"[vqa_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][6]:.4f}")
+        print(f"[vqa_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][6]:.4f}")
 
     else:
-        print(f"Evaluation failed for {args.dataset_path}")
+        print(f"Evaluation failed for {dataset_path}")
 
 
 
