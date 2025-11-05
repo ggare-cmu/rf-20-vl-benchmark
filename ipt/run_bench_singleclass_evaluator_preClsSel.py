@@ -1,11 +1,5 @@
 '''
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --dataset_path ../rf100-vl/ --vqa_rescore --no_instructions
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --no_instructions --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --apply_nms --nms_threshold 0.5 --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_new/rf20_singleclass_codePrompt_vqaScore_classRescore_nms0.5_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --few_shot --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_fixedPadBug/rf20_singleclass_codePrompt_vqaScore_nms0.5_fewShot_v1 --device_map_auto
-Run cmd: CUDA_VISIBLE_DEVICES=2 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_tmp2/rf20_singleclass_codePrompt_vqaScore_classRescore_nms0.5_v1 --vqa_batch_size 1
+Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_evaluator_preClsSel.py --model_name Qwen2.5-VL-7B-Instruct --vqa_rescore --apply_nms --nms_threshold 0.5 --data_instr_path results/rf100vl_IPT/Qwen2.5-VL-7B-Instruct/rf20_IPT_singleclass_vqaScore_withNMS/iterative_prompt_refinement/all_refined_class_instructions_wb-prova.json --output_dir results/rf100vl_IPT_eval_tmp/rf20_IPT_singleclass_vqaScore_withNMS_tmp --vqa_batch_size 1 --dataset_path wb-prova
 '''
 
 import os
@@ -329,6 +323,111 @@ def apply_nms(detections, iou_threshold=0.5):
 
 
 
+def queryPresentClasses(args, model, processor, class_name_list, dataset_instructions_json, image_path):
+    """
+    Uses the VLM to generate a textual definition of a class based on few-shot examples.
+    """
+    
+    # set_seed(args.seed)
+
+    content = [
+        {"type": "text", "text": 
+        f"""
+            Analyze the image carefully and identify all object classes visible in it. 
+            You must choose only from the following class names: {class_name_list}.
+
+            Use the provided class definitions to guide your reasoning:
+            \n{dataset_instructions_json}\n
+
+            Return the final output as a valid Python list of class names detected in the image, 
+            in the exact format below:
+
+            ```python
+            ['class_name_1', 'class_name_2', ...]
+            ```
+        """
+        },
+        {"type": "image", "image": image_path},
+    ]
+
+    messages = [{"role": "user", "content": content}]
+    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, _ = process_vision_info(messages)
+    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+
+    with torch.no_grad():
+        # generated_ids = model.generate(**inputs, max_new_tokens=256)
+        generated_ids = model.generate(**inputs, max_new_tokens=2048)
+    
+    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
+    present_classes_output = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+    print(f"Detected classes: {present_classes_output}")
+    return present_classes_output
+
+
+import re
+import json
+import ast
+
+def extract_present_classes(response_text, class_name_list):
+    """
+    Parses the VLM model's response to extract the Python list of class names.
+    
+    Args:
+        response_text (str): Raw output text from the VLM model.
+
+    Returns:
+        list[str]: List of class names extracted from the response.
+    """
+
+    candidate_classes = []
+
+    # Step 1: Try to locate a Python list enclosed in triple backticks
+    pattern = r"```python\s*(\[[^\]]*\])\s*```"
+    match = re.search(pattern, response_text, re.DOTALL)
+    
+    # Step 2: Fallback — try to find any list-like content if markdown missing
+    if not match:
+        match = re.search(r"(\[[^\]]*\])", response_text, re.DOTALL)
+
+    if match:
+        try:
+            class_list = ast.literal_eval(match.group(1))
+            # Validate it's a list of strings
+            if isinstance(class_list, list) and all(isinstance(c, str) for c in class_list):
+                # return class_list
+                candidates_classes = class_list
+        except Exception:
+            pass
+
+    if len(candidate_classes) == 0:
+        # Step 3: Handle potential comma- or newline-separated text fallback
+        text = response_text.strip()
+        candidates = re.findall(r"\b[a-zA-Z0-9_\-]+\b", text)
+        candidate_classes = candidates
+        
+    
+    #Match candidate classes to valid class names
+    present_classes = []
+    for c in candidate_classes:
+
+        for actual_cls in class_name_list:
+            if c.lower() == actual_cls.lower():
+                present_classes.append(actual_cls)
+                break
+            elif actual_cls.lower().startswith(c.lower()) or c.lower().startswith(actual_cls.lower()):
+                present_classes.append(actual_cls)
+                break
+            else:
+                continue
+
+    if len(present_classes) == 0:
+        present_classes = class_name_list #Fallback to all classes if none found
+    
+    return present_classes
+
+
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
                                 #   no_instructions=False, few_shot_examples=None, output_dir="."):
                                     no_instructions=False, few_shot_dict=None, output_dir="."):
@@ -342,7 +441,30 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     all_few_shot_examples = []
 
 
-    for class_name in class_name_list: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
+    #Qwery the model to see which classes are present in the image
+    if len(class_name_list) > 2:
+        print(f"Querying model for classes present in image: {image_path}")
+        
+        
+        set_seed(args.seed)
+        
+        present_classes_output = queryPresentClasses(
+            args, model, processor,
+            class_name_list=class_name_list,
+            dataset_instructions_json=dataset_instructions_json,
+            image_path=image_path
+        )
+
+        present_classes = extract_present_classes(present_classes_output, class_name_list)
+        print(f"Classes present in image: {present_classes}")
+
+    else:
+        present_classes = class_name_list
+
+
+
+    # for class_name in class_name_list: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
+    for class_name in present_classes: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
         
         if class_name in dataset_instructions_json:       
             dataset_instructions = dataset_instructions_json[class_name]
@@ -1083,8 +1205,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 ann_ids = coco_gt.getAnnIds(imgIds=[img_id])
                 anns = coco_gt.loadAnns(ann_ids)
                 
-                # cat_ids_for_image = set(ann["category_id"] for ann in anns)
-                # print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]["name"] for cat_id in cat_ids_for_image]}")
+                cat_ids_for_image = set(ann["category_id"] for ann in anns)
+                print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]["name"] for cat_id in cat_ids_for_image]}")
                 
                 
                 raw_output, few_shot_examples_used, all_detections = run_inference_on_single_image( #grg_changed
