@@ -3,7 +3,8 @@
 SESSION_NAME="rf20_IPT_singleclass_vqaScore_withNMS"
 GPU_MEMORY_THRESHOLD=6000    # MB free memory needed to start a job
 CHECK_INTERVAL=20            # seconds between GPU memory checks
-WORKDIR="/scratch/ggare/Research/VLMattributeClassifier"
+WORKDIR=$(pwd)
+# WORKDIR="/scratch/ggare/Research/VLMattributeClassifier"
 
 # --- Configuration for job command ---
 
