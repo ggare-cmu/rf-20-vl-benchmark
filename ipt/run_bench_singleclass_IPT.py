@@ -2222,13 +2222,17 @@ def run_single_dataset_evaluation(args):
 
     
     # Run the iterative prompt refinement process
-    dataset_instructions_override_json = iterative_prompt_refinement(
-        args,
-        model=model,
-        processor=processor,
-        dataset_path=dataset_path,
-        num_iterations=args.num_ipt_iterations
-    )
+    if os.path.exists(os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions_{os.path.basename(dataset_path)}.json")):
+        print(f"Refined class instructions already exist. Skipping IPT.")
+        
+    else:
+        dataset_instructions_override_json = iterative_prompt_refinement(
+            args,
+            model=model,
+            processor=processor,
+            dataset_path=dataset_path,
+            num_iterations=args.num_ipt_iterations
+        )
 
 
     # After use free up memory:
