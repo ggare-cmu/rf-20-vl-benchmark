@@ -1,8 +1,4 @@
 '''
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --dataset_path ../rf100-vl/ --vqa_rescore --no_instructions
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --no_instructions --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --apply_nms --nms_threshold 0.5 --output_dir results/rf100vl/rf20_singleclass_codePrompt_vqaScore_v1 --gpu_ids 0 1 2 3 4 5 6 7
 Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_new/rf20_singleclass_codePrompt_vqaScore_classRescore_nms0.5_v1 --gpu_ids 0 1 2 3 4 5 6 7
 Run cmd: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --few_shot --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_fixedPadBug/rf20_singleclass_codePrompt_vqaScore_nms0.5_fewShot_v1 --device_map_auto
 '''
@@ -15,7 +11,6 @@ import torch
 import shutil
 from PIL import Image
 from tqdm import tqdm
-import streamlit as st
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -104,11 +99,6 @@ def _load_qwen_model_raw(qwen_device="cuda:0", device_map_auto=False):
     # processor.save_pretrained("./qwen2_5_vl_leftpad")
 
     return model, processor
-
-@st.cache_resource
-def load_qwen_model_cached(qwen_device="cuda:0"): # For Streamlit
-    """Cached loader for the Qwen model and processor for Streamlit. Note: device_map_auto is not supported in Streamlit mode via this function."""
-    return _load_qwen_model_raw(qwen_device, device_map_auto=False)
 
 def load_qwen_model(qwen_device="cuda:0", device_map_auto=False): # For CLI
     """Loads the Qwen model and processor for CLI use."""
@@ -241,9 +231,6 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         if class_name in dataset_instructions_json:       
             dataset_instructions = dataset_instructions_json[class_name]
         else:
-            # #Capitalize first letter to match keys
-            # class_name_cap = class_name[0].upper() + class_name[1:]
-            # dataset_instructions = dataset_instructions_json[class_name_cap]
 
             # Find the matching key ignoring case
             matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
@@ -255,30 +242,9 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         
         return dataset_instructions
 
-    # def getPrompt(prompt):
-    #     # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-    #     question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-    #     return question
 
 
     def getPrompt(prompt, dataset_instructions_json):
-        # # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        # question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        
-        # question = f"""Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
-        # The '{prompt}' class is described as follows in this context: {getDatasetInstructions(dataset_instructions_json, prompt)}"""
-        
-        # question = f"""
-        #     Does the red bounding box in the image completely contain the main subject or object referred to as '{prompt}'? 
-        #     Please answer only with "Yes" or "No".
-
-        #     Requirements:
-        #     - The '{prompt}' object must be **entirely inside** the red bounding box (no part should extend outside it).
-        #     - The bounding box must contain **only this object** — no other objects should appear within it.
-
-        #     Context: The '{prompt}' class is defined as follows:
-        #     {getDatasetInstructions(dataset_instructions_json, prompt)}
-        # """
 
         question = f"""
             Given the '{prompt}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, prompt)}
@@ -295,8 +261,6 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         batch_prompts = prompt_list[i:i + batch_size]
         
         # Create conversations for the batch
-        # conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": question}]}] for img in batch_pil_images]
-        # conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
         # Prepare inputs for the model
@@ -316,9 +280,6 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-9)).cpu().numpy()
-        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-29)).cpu().numpy()
-        # batch_scores = (yes_probs / (yes_probs + no_probs)).cpu().numpy()
         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
         all_final_scores.extend(batch_scores.tolist())
     
@@ -345,7 +306,6 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         batch_prompts = prompt_list[i:i + batch_size]
         
         # Create conversations for the batch
-        # conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": question}]}] for img in batch_pil_images]
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
         # Prepare inputs for the model
@@ -365,9 +325,6 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-9)).cpu().numpy()
-        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-29)).cpu().numpy()
-        # batch_scores = (yes_probs / (yes_probs + no_probs)).cpu().numpy()
         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
         all_final_scores.extend(batch_scores.tolist())
     
@@ -428,21 +385,11 @@ def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, p
     num_cls = len(class_name_list)
 
     def getPrompt(prompt):
-        # # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        # question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        # question = f"Which grid in the image corresponds to the subject or object referred to in this sentence: '{prompt}'? Please only answer using a grid number (in Excel format: $colrow$) from the following: {str([[f"{chr(ord('A') + col)}{row}" for row in range(grid_size)] for col in range(grid_size)]).replace('[', '').replace(']', '')}" # * Best Prompts * - 1st best needs to be tested on entire dataset
-        # question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {str([f"[{i}]: {c}" for i,c in enumerate(class_name_list)])[1:-1].replace("'", '')}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: [0]" #50,48 #* Best Prompts *
-        # question = f"Identify which class the subject or object inside the red bounding box relates to the best from the following options: {str([f"[{i}]:{c}" for i,c in enumerate(class_name_list)])[1:-1].replace("'", '')}. Respond only with the class index number. For example, if the class is {class_name_list[0]}, output [0]." #47,46
-        # question = f"Identify which class the subject or object inside the red bounding box belongs to from the following options: {str([f"[{i}]:{c}" for i,c in enumerate(class_name_list)])[1:-1].replace("'", '')}. Respond only with the class index number. For example, if the class is {class_name_list[0]}, output [0]." #50,48
-        # question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {str([f"[{i}]: {c}" for i,c in enumerate(class_name_list)])[1:-1].replace("'", '')}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: [0]"
-        
-        # class_options = [f"[{chr(ord('A') + i)}]: {c}" for i, c in enumerate(class_name_list)]
         class_options = [f"${chr(ord('A') + i)}$: {c}" for i, c in enumerate(class_name_list)]
         class_options_str = ", ".join(class_options)
         # example_class_token = f"[{chr(ord('A'))}]"
         example_class_token = f"${chr(ord('A'))}$"
         
-        # question = f"Identify which class the subject or object inside the red bounding box belongs to from the following options: {class_options_str}. Respond only with the class index letter. For example, if the class is {class_name_list[0]}, output {example_class_token}."
         question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {class_options_str}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: {example_class_token}."
         return question
 
@@ -453,7 +400,6 @@ def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, p
         batch_prompts = prompt_list[i:i + batch_size]
         
         # Create conversations for the batch
-        # conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": question}]}] for img in batch_pil_images]
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
  
         # Prepare inputs for the model
@@ -475,8 +421,7 @@ def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, p
             
             # We take the mean for all found tokens 
             cls_scores = torch.concat([outputs.scores[i][b].unsqueeze(0) for i in range(len(outputs.scores)) if cls_index[i] == 1], dim = 0).mean(dim = 0).unsqueeze(0)
-            # cls_token_ids = [qwen_processor.tokenizer.encode(f"{cls}")[0] for cls in range(num_cls)]
-            # cls_scores = torch.concat([outputs.scores[i][b].unsqueeze(0) for i, token_is_cls_idx in enumerate(cls_index) if token_is_cls_idx], dim=0).mean(dim=0).unsqueeze(0)
+        
             # Get token IDs for 'A', 'B', 'C', etc.
             cls_token_ids = [qwen_processor.tokenizer.encode(f"{chr(ord('A') + i)}")[0] for i in range(num_cls)]
             print("[{b}] Cls-Tokens:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_ids)]))
@@ -494,27 +439,16 @@ def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, p
             print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
 
             #Normalize the col & row token probs - to avoid row/col domination
-            # cls_token_probs = torch.softmax(torch.log(torch.tensor(cls_token_probs)), dim = 0)
+        
             cls_token_probs = torch.tensor(cls_token_probs)
             cls_token_probs = cls_token_probs/cls_token_probs.sum()
             print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
 
             all_final_scores.append({'cls_name': class_name_list[cls_token_probs.argmax()], 'cls_prob':cls_token_probs.max()})
         
-        # # Calculate 'Yes' probability
-        # scores = outputs.scores[0]
-        # probs = torch.nn.functional.softmax(scores, dim=-1)
         
-        # yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        # no_token_id = qwen_processor.tokenizer.encode("No")[0]
-        
-        # yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-9)).cpu().numpy()
-        # all_final_scores.extend(batch_scores.tolist())
-
-    
-    # return np.array(all_final_scores)
     return all_final_scores
+
 
 def calculate_iou(boxA_xywh, boxB_xywh):
     """
@@ -566,14 +500,11 @@ def apply_nms(detections, iou_threshold=0.5):
 
     return kept_detections
 
-# def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None, output_dir="."):
-# def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions, class_name_list, 
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
                                     no_instructions=False, few_shot_dict=None, output_dir=".", 
                                     eval_class_name=None):
     """
     Runs Qwen inference on a single image and parses the output.
-    This is the common logic shared between Streamlit and CLI modes.
     """
     set_seed(args.seed)
 
@@ -581,7 +512,6 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     parsed_bboxes = []
     all_few_shot_examples = []
 
-    # for cat_id in cat_ids_for_image: #GRG: This iterates over each category in the image - which can artifically boost results as we ignore predictions for missing categories
     for class_name in class_name_list: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
         
         if eval_class_name is not None and class_name != eval_class_name:
@@ -590,10 +520,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         if class_name in dataset_instructions_json:       
             dataset_instructions = dataset_instructions_json[class_name]
         else:
-            # #Capitalize first letter to match keys
-            # class_name_cap = class_name[0].upper() + class_name[1:]
-            # dataset_instructions = dataset_instructions_json[class_name_cap]
-
+           
             # Find the matching key ignoring case
             matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
             if matched_key:
@@ -608,7 +535,6 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             num_few_shot = 3
             # num_few_shot = min(3, len(few_shot_samples)) 
             few_shot_examples_for_cat = few_shot_dict.get(class_name, [])
-            # few_shot_samples_i = random.sample(few_shot_samples, num_few_shot) if few_shot_examples else None
             few_shot_examples_for_cat_i = random.sample(few_shot_examples_for_cat, num_few_shot)
         else:
             # few_shot_samples_i = None
@@ -631,7 +557,6 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             few_shot_examples=few_shot_examples_for_cat_i
         )
 
-        # parsed_bboxes = parse_qwen_output_to_detections(raw_output, class_name_list, output_dir=output_dir)
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
         # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
@@ -743,57 +668,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
 
         prompt_text = (
         # *** Best so far ***
-
-        # 40,48 [51,48 withVQA] f""" #** Best
-        # f"""
-        #     Follow the steps outlined in the pseudo code below on this image. 
-        #     Do NOT return code or explanations — only output the final JSON list of bounding boxes.
-
-        #     Pseudo code for reference:
-        #     INPUT:
-        #         - image
-        #         - class_list = {class_name_list}  # list of classes to detect
-
-        #     PROCESS:
-        #         detections = []  # initialize empty list for detected objects
-
-        #         for each class_name in class_list:
-        #             # Step 1: Scan the image at multiple scales to detect both large and tiny objects
-        #             multi_scale_regions = model.predict_regions_multiscale(image, class_name)
-
-        #             # Step 2: For each candidate region, get bounding box and initial confidence score
-        #             for region in multi_scale_regions:
-        #                 bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
-        #                 bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
-        #                 class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
-
-        #                 # Step 3: Combine both scores for final confidence
-        #                 # - This ensures the score reflects both detection quality and label match
-        #                 calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
-
-
-        #                 # Step 4: Include even small objects (tiny bounding boxes)
-        #                 detections.append({{
-        #                     "bbox_2d": bbox,
-        #                     "label": class_name,
-        #                     "score": calibrated_score
-        #                 }})
-
-        #         # Optional: sort detections by score descending
-        #         detections.sort(key=lambda x: x['score'], reverse=True)
-
-        #     OUTPUT:
-        #         Return the 'detections' list in JSON format
-        # """
-
-        #2 35,53 [38,55 withVQA] f"For every class name in this list: {class_name_list}, find all objects (including living things in the image) that are related to it. For all detected objects score how semantically related it is to one of the class name on a scale from 0 to 1. Return the detected object's bounding box coordinates along with the score as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name_list[0]}\",\"score\":*confidence_score 0-1*}}."  #**Best recall
-        #2b 38,50 f"For every class label in this list: {class_name_list}, find all objects (including living things in the image) that are related to it. For all detected objects score how semantically related it is to one of the class label on a scale from 0 to 1. Return the detected object's bounding box coordinates along with the score as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name_list[0]}\",\"score\":*confidence_score 0-1*}}."  #**1b Best**
-        #1 38,46 f"For every object (including living things and text) in the image that are related to one of the class name in this list: {class_name_list}. For all detected objects score how semantically related it is to one of the class name on a scale from 0 to 1. Return the detected object's bounding box coordinates along with the score as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name_list[0]}\",\"score\":*confidence_score 0-1*}}." #**1a Best**
-
-        #1c 47,47 [41,47 withVQA] f"For every class label name in this list: {class_name_list}, find all objects (including living things in the image) that are related to it. For all detected objects score how semantically related it is to one of the class label name on a scale from 0 to 1. Return the detected object's bounding box coordinates along with the score as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name_list[0]}\",\"score\":*confidence_score 0-1*}}. Note: 1) Avoid overlapping bounding boxes 2) No object with multiple class labels." #**Best**
-        
-        #Baseline-single-class: 47,52 f"Detect all of the subjects or objects that can be referred as '{class_name}' in the image and return their locations coordinates, as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}." #**2nd Best**
-            
+ 
             # - class_list = {class_name_list}  # list of classes to detect
             
             f"""
@@ -838,33 +713,8 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
         """
         )
     else:
+        
         prompt_text = (
-
-    # print(f"Using dataset instructions in the prompt: {dataset_instructions}")
-    
-    # prompt_text = (
-    #     f"Detect all of the {class_name}s in the image and return their locations coordinates, use image dataset's annotator instruction for help."
-    #     f"Here are the instructions:\n{dataset_instructions}\n\n"
-    #     f"Return a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}."
-    # )
-    # prompt_text = (
-    #     # f"Detect all of the {class_name}s in the image and return their locations coordinates, use image dataset's annotator instruction for help."
-    #     f"Detect all of the subjects or objects that can be referred as '{class_name}' in the image, use image dataset's annotator instruction for help. and return their locations coordinates, as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}." #**2nd Best**
-    #     f"Here are the instructions:\n{dataset_instructions}\n\n"
-    #     f"Return a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}."
-    # )
-
-        # no-instruct = 40,48 [51,48 withVQA] f""" #** Best
-        # with-instruct = [41,41 withVQA] f"""
-        # with-instruct = [48,44 withVQA] f""" Use the following image dataset's annotator instruction for better understanding the class name definitions:\n{dataset_instructions}"
-        # with-instruct = [46,43 withVQA] f""" Use the following dataset annotator instructions to understand class name definitions and apply them consistently:\n{dataset_instructions}"
-        # with-instruct = [47,43 withVQA] f""" Use the following dataset's annotator instructions to better understand class name definitions and instructions for how to annotate the bounding boxes:\n{dataset_instructions}"
-        # with-instruct = [46,43 withVQA] f""" Following the dataset's annotator instructions detect and draw the bounding boxes and for better understand class name definitions:\n{dataset_instructions}\n"
-        # with-instruct = [48,44 withVQA] f""" Follow the dataset’s annotator instructions when detecting objects in this image. Use these instructions to correctly interpret and apply the class name definitions:\n{dataset_instructions}\n"
-        # with-instruct = [48,44 withVQA] f""" Follow the steps outlined in the pseudo code below on this image by following class name definitions and dataset's annotator instructions outlined as follows:\n{dataset_instructions}\n"
-        # with-instruct = [48,44 withVQA] f""" Follow the steps outlined in the pseudo code below on this image. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
-        )
-    prompt_text = (
         f"""
             Follow the steps outlined in the pseudo code below on this image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
 
@@ -913,88 +763,13 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
     )
 
     if few_shot_examples and len(few_shot_examples) > 0:
-        # messages = [
-        #     {
-        #         "role": "user",
-        #         "content": [
-        #             {"type": "text", "text": (
-        #                 f"Detect all of the {class_name}s in the image and return their locations coordinates, use image dataset's annotator instruction and 2 image examples for help."
-        #                 f"Here are the instructions:\n{dataset_instructions}\n\n"
-        #                 f"Here are 2 images with example detection(s) (in red boxes) of {class_name}s:"
-        #             )},
-        #             {"type": "image", "image": few_shot_examples[0]["viz_path"]},
-        #             {"type": "image", "image": few_shot_examples[1]["viz_path"]},
-        #             {"type": "text", "text": f"Return a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}. Here is the image to detect {class_name}s in:"},
-        #             {"type": "image", "image": image_path},
-        #         ],
-        #     }
-        # ]
+        
         messages = [
             {
                 "role": "user",
                 "content": [
-                    # {"type": "text", "text": ( #0.036, 0.075 
-                    #     # f"Detect all of the {class_name}s in the image and return their locations coordinates, use image dataset's annotator instruction and 2 image examples for help."
-                    #     # f"""
-                    #     #     Follow the steps outlined in the pseudo code below on this image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
-                    #     f"""
-                    #         Follow the steps outlined in the pseudo code below on this query image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
-            
-                    #         Do NOT return few_shot_examplescode or explanations — only output the final JSON list of bounding boxes.
-
-                            
-                    #         Pseudo code for reference:
-                    #         INPUT:
-                    #             - image
-                    #             - class_list = {class_name_list}  # list of classes to detect
-
-                    #         PROCESS:
-                    #             detections = []  # initialize empty list for detected objects
-
-                    #             for each class_name in class_list:
-                    #                 # Step 1: Scan the image at multiple scales to detect both large and tiny objects
-                    #                 multi_scale_regions = model.predict_regions_multiscale(image, class_name)
-
-                    #                 # Step 2: For each candidate region, get bounding box and initial confidence score
-                    #                 for region in multi_scale_regions:
-                    #                     bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
-                    #                     bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
-                    #                     class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
-
-                    #                     # Step 3: Combine both scores for final confidence
-                    #                     # - This ensures the score reflects both detection quality and label match
-                    #                     calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
-
-
-                    #                     # Step 4: Include even small objects (tiny bounding boxes)
-                    #                     detections.append({{
-                    #                         "bbox_2d": bbox,
-                    #                         "label": class_name,
-                    #                         "score": calibrated_score
-                    #                     }})
-
-                    #             # Optional: sort detections by score descending
-                    #             detections.sort(key=lambda x: x['score'], reverse=True)
-
-                    #         OUTPUT:
-                    #             Return the 'detections' list in JSON format
-
-                    #     """   
-                    #     # f"Here are the instructions:\n{dataset_instructions}\n\n"
-                    #     # f"Here are 2 images with example detection(s) (in red boxes) of {class_name}s:"
-                    # )},
-                    # {"type": "text", "text": f"Here is a reference image with example detection(s) in red bounding boxes of '{few_shot_examples[0]["category_name"]}' class:"},
-                    # {"type": "image", "image": few_shot_examples[0]["viz_path"]},
-                    # {"type": "text", "text": f"Here is a reference image with example detection(s) in red bounding boxes of '{few_shot_examples[1]["category_name"]}' class:"},
-                    # {"type": "image", "image": few_shot_examples[1]["viz_path"]},
-                    # {"type": "text", "text": f"Here is a reference image with example detection(s) in red bounding boxes of '{few_shot_examples[2]["category_name"]}' class:"},
-                    # {"type": "image", "image": few_shot_examples[2]["viz_path"]},
-                    # {"type": "text", "text": f"Here is the query image to be analyzed:"},
-                    # {"type": "image", "image": image_path},
+        
                     {"type": "text", "text": ( 
-                        # f"Detect all of the {class_name}s in the image and return their locations coordinates, use image dataset's annotator instruction and 2 image examples for help."
-                        # f"""
-                        #     Follow the steps outlined in the pseudo code below on this image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
                         f"""
                             Follow the steps outlined in the pseudo code below on the query image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
             
@@ -1064,92 +839,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
                 ],
             }
         ]
-        # [Old 52,48 withVQA]
-        # messages = [
-        #     {
-        #         "role": "user",
-        #         "content": [
-        #             {"type": "text", "text": f"""
-        #                                     Follow the steps outlined in the pseudo code below on this image. 
-        #                                     Do NOT return code or explanations — only output the final JSON list of bounding boxes.
-
-        #                                     Pseudo code for reference:
-        #                                     INPUT:
-        #                                         - image
-        #                                     """
-        #             },
-        #             # {"type": "image", "image": image_path}, #[34,36 withVQA]
-        #             {"type": "text", "text": f"""
-        #                                         - class_list = {class_name_list}  # list of classes to detect
-
-        #                                     PROCESS:
-        #                                         detections = []  # initialize empty list for detected objects
-
-        #                                         for each class_name in class_list:
-        #                                             # Step 1: Scan the image at multiple scales to detect both large and tiny objects
-        #                                             multi_scale_regions = model.predict_regions_multiscale(image, class_name)
-
-        #                                             # Step 2: For each candidate region, get bounding box and initial confidence score
-        #                                             for region in multi_scale_regions:
-        #                                                 bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
-        #                                                 bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
-        #                                                 class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
-
-        #                                                 # Step 3: Combine both scores for final confidence
-        #                                                 # - This ensures the score reflects both detection quality and label match
-        #                                                 calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
-
-
-        #                                                 # Step 4: Include even small objects (tiny bounding boxes)
-        #                                                 detections.append({{
-        #                                                     "bbox_2d": bbox,
-        #                                                     "label": class_name,
-        #                                                     "score": calibrated_score
-        #                                                 }})
-
-        #                                         # Optional: sort detections by score descending
-        #                                         detections.sort(key=lambda x: x['score'], reverse=True)
-
-        #                                     OUTPUT:
-        #                                         Return the 'detections' list in JSON format
-        #                                 """
-        #             },
-        #             # {"type": "image", "image": image_path}, #[40,42 withVQA]
-        #             {"type": "text", "text": f"""
-        #                                     Now, apply the following additional step to each bounding box in 'detections' to double its size before returning:
-                     
-        #                                     Pseudo code to pad bbox:
-
-        #                                     INPUT:
-        #                                         - detections  # list of detected objects with "bbox_2d"
-
-        #                                     PROCESS:
-        #                                         #Step 1: For each detection in detections:
-        #                                         for detection in detections:        
-        #                                             [x_min, y_min, x_max, y_max] = detection["bbox_2d"]
-        #                                             width = x_max - x_min
-        #                                             height = y_max - y_min
-        #                                             center_x = x_min + width / 2
-        #                                             center_y = y_min + height / 2
-        #                                             # Step 2: Enlarge the bbox by a factor of 2
-        #                                             new_width = width * 2
-        #                                             new_height = height * 2
-        #                                             # Step 3: Calculate new bbox coordinates
-        #                                             new_x_min = max(0, center_x - new_width / 2)
-        #                                             new_y_min = max(0, center_y - new_height / 2)
-        #                                             new_x_max = min(image.width, center_x + new_width / 2)
-        #                                             new_y_max = min(image.height, center_y + new_height / 2)
-        #                                             # Step 4: Update detection with new bbox    
-        #                                             detection["bbox_2d"] = [new_x_min, new_y_min, new_x_max, new_y_max]
-
-        #                                     OUTPUT:
-        #                                         Return detections strictly as a valid JSON list
-        #                                     """
-        #             },
-        #             {"type": "image", "image": image_path}, #[40,42 withVQA]
-        #         ],
-        #     }
-        # ]
+       
 
 
     text_input = processor.apply_chat_template(
@@ -1176,21 +866,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
         # generated_ids = model.generate(**inputs, max_new_tokens=1024)
         generated_ids = model.generate(**inputs, max_new_tokens=2048)
 
-    # with torch.inference_mode():
-    #     outputs = model.generate(
-    #         **inputs,
-    #         # max_new_tokens=1,
-    #         # max_new_tokens=2,
-    #         # max_new_tokens=5,
-    #         max_new_tokens=10,
-    #         do_sample=False,
-    #         # # Set temp/top_p to neutral values for greedy search to suppress warnings
-    #         # temperature=1.0,
-    #         # top_p=1.0,
-    #         output_scores=True,
-    #         return_dict_in_generate=True
-    #     )   
-    
+
         
     generated_ids_trimmed = [
         out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
@@ -1495,14 +1171,6 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
         print(f"Built few-shot examples dictionary with {len(few_shot_dict)} categories and {len(few_shot_samples)} total examples for {dataset_path}.")
     else:
         few_shot_dict = None
-
-    # dataset_instructions = ""
-    # if dataset_instructions_override is not None:
-    #     dataset_instructions = dataset_instructions_override
-    # else:
-    #     if os.path.isfile(readme_path):
-    #         with open(readme_path, "r", encoding="utf-8") as f:
-    #             dataset_instructions = f.read()
     
     dataset_instructions_json = {}
     if dataset_instructions_override_json is not None:
@@ -1619,7 +1287,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
 
                 total_count += 1
                 
-                # Yield results for Streamlit live updates
+                # Yield results for live updates
                 yield {
                     "img_id": img_id,
                     "image_path": image_path,
@@ -1714,64 +1382,7 @@ def generate_initial_class_definition(args, model, processor, class_name, initia
 
     content = [
         {"type": "text", "text": 
-        # f"""Based on the following example images showing '{class_name}' in green bounding boxes, describe the key visual characteristics of this class. 
-        # Provide a concise, clear, and descriptive definition that could be used to instruct someone on how to identify these objects. 
-        # Do not mention the bounding boxes or colors in your response.
-        # """
-        # f"""Describe the objects in the following example images shown in green bounding boxes, 
-        # describe the collective key visual characteristics common and unique to these objects, such that it can be used for identification and detection. 
-        # Provide a concise, clear, and descriptive definition that could be used to instruct someone on how to identify these objects. 
-        # Do not mention the bounding boxes or colors in your response.
-        # Sample description for reference: {initial_instructions}\n
-        # """
-        # f"""Analyze the example images and describe the objects highlighted in green bounding boxes. 
-        #     Identify and summarize the key visual characteristics that are consistently observed across these objects, 
-        #     noting any features that distinguish them from other object types. 
-        #     Your goal is to produce a concise, clear, and descriptive definition that can be used to guide accurate identification and detection of this object class. 
-        #     Avoid mentioning bounding boxes or colors in your response. 
-        #     For reference, consider the following example description: \n{initial_instructions}\n
-        # """
-        # f"""Analyze the following images and describe the subjects or objects highlighted in green bounding boxes. 
-        #     Identify and summarize the key visual characteristics that are consistently observed across these objects, 
-        #     specifically calling out all features that distinguish them from other object in the scene. 
-        #     Your goal is to produce a clear and descriptive definition that can be used to guide accurate identification and distinction of this object class from other objects in the scene. 
-        #     Avoid mentioning bounding boxes or colors in your response. 
-        #     For reference, consider the following example description: \n{initial_instructions}\n
-        # """
-        # f"""
-        #     Analyze the following images and describe the subjects or objects highlighted in green bounding boxes. 
-        #     Identify and summarize the key visual characteristics that are consistently present across these objects. 
-        #     Focus on the distinctive visual features that set this object class apart from other elements in the scene. 
-
-        #     Your goal is to produce a clear, detailed, and generalizable definition that can guide accurate recognition of this object class in future images and easily distinguishable from other objects in the scene. 
-        #     Do not mention bounding boxes, colors, or any annotation details in your response.
-
-        #     For reference, here is an example description:
-        #     {initial_instructions}
-        # """
-        
-        
-        # f"""
-        #     Analyze the following images and describe the subjects or objects highlighted in green bounding boxes. 
-        #     Identify and summarize the key visual characteristics that are consistently observed across these objects. 
-        #     Emphasize the distinctive features that clearly differentiate this object class from other elements in the scene.
-
-        #     Your goal is to produce a clear, detailed, and generalizable definition that enables accurate recognition of this object class in future images and makes it easily distinguishable from other objects. 
-        #     Do not mention bounding boxes, colors, or any annotation details in your response.
-
-        #     For reference, here is an example description:
-        #     {initial_instructions}
-        # """
-
-        # f"""
-        #     Analyze the following images and describe the subjects or objects highlighted in green bounding boxes. 
-        #     Identify and summarize the key visual characteristics that are consistently observed across these objects. 
-        #     Emphasize the distinctive features that clearly differentiate this object class from other elements in the scene.
-
-        #     Your goal is to produce a clear, detailed, and generalizable definition that enables accurate recognition of this object class in future images and makes it easily distinguishable from other objects. 
-        #     Do not mention bounding boxes, colors, or any annotation details in your response.
-        # """
-
+       
         f"""
             Analyze the following images and describe the subjects or objects highlighted in green bounding boxes. 
             Identify and summarize the key visual characteristics that are consistently observed across these objects. 
@@ -1820,52 +1431,7 @@ def generate_class_definition(args, model, processor, class_name, current_instru
         # {"type": "text", "text": f"Based on the following example images showing '{class_name}', describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
         # {"type": "text", "text": f"Based on the following example images showing '{class_name}' in green bounding boxes, describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
         {"type": "text", "text": 
-        #  f"""Improve the following class name definitions for better detecting '{class_name}' class shown in green bounding boxes.
-        # 
-        #  such that the objects in red bounding boxes are not included whereas the objects in the yellow bounding boxes are included.
-        #  
-        #  f"""Given the following class name definitions: {current_instructions}\n
-        #  Based on the following example images, improve the class name definitions for better detecting '{class_name}' class shown in green bounding boxes. 
-        #  The class name definition needs to be improved to describe the key visual characteristics of this class,
-        #  such that the objects in the blue bounding boxes are included whereas the objects in the red bounding boxes are excluded.
-        #  Provide a concise definition that could be used to instruct someone on how to identify these objects. 
-        #  Return only the improved class name definitions containing all class definitions along with the improved '{class_name}' class definition.
-        #  Do not mention the bounding boxes."""
-        # f"""Refine and improve the following class name definitions used for object detection: {current_instructions}\n
-        #  Based on the following example images, improve the class name definitions for better detecting '{class_name}' class shown in green bounding boxes. 
-        #  The class name definition needs to be improved to describe the key visual characteristics of this class,
-        #  such that the objects in the blue bounding boxes are included whereas the objects in the red bounding boxes are excluded.
-        #  Provide a concise definition that could be used to instruct someone on how to identify these objects. 
-        #  Return only the improved class name definitions containing all class definitions along with the improved '{class_name}' class definition.
-        #  Do not mention the bounding boxes."""
         
-        # f"""Refine and improve the following object class definitions used for object detection: {current_instructions}
-
-        #     Using the provided example images, enhance the definition of the '{class_name}' class (highlighted with green bounding boxes). 
-        #     Revise its description to clearly capture the key visual features that distinguish this class.
-
-        #     Ensure the improved definition:
-        #     - Includes objects similar to those shown with blue bounding boxes.
-        #     - Excludes objects similar to those shown with red bounding boxes.
-
-        #     Provide a concise, clear, and descriptive definition suitable for training or guiding object identification.
-        #     Return only the complete set of class definitions, including the refined '{class_name}' definition.
-        #     Do not refer to bounding boxes or colors in your response.
-        # """
-
-        # f"""Refine and improve the following object class definition of the '{class_name}' used in object detection: {current_instructions}
-
-        #     Using the provided example images, enhance the definition of the '{class_name}' class (highlighted with green bounding boxes). 
-        #     Revise its description to clearly capture the key visual features that distinguish this class.
-
-        #     Ensure the improved definition:
-        #     - Includes objects similar to those shown with blue bounding boxes.
-        #     - Excludes objects similar to those shown with red bounding boxes.
-
-        #     Provide a concise, clear, and descriptive definition suitable for training or guiding object identification.
-        #     Return only the refined '{class_name}' class definition.
-        #     Do not refer to bounding boxes or colors in your response.
-        # """
         
         f"""Refine and improve the object class definition for '{class_name}' used in object detection: {current_instructions}
 
@@ -1916,98 +1482,6 @@ def generate_class_definition_withFP(args, model, processor, class_name, current
         # {"type": "text", "text": f"Based on the following example images showing '{class_name}' in green bounding boxes, describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
         {"type": "text", "text": 
         
-        # f"""Using the class definition for the '{class_name}' class, 
-            
-        #     the VLM model successfully identifies the '{class_name}' in the 'correct_image' shown in green bounding boxes. However, false positive detections are observed in the 'FP_error_image' shown in red bounding boxes, where the model mistakenly identifies an incorrect object.
-
-        #     Compare and critique the ambiguity in the class definitions that may have contributed to this false positive, by analyzing the provided images.
-        #     Specifically, identify which visual features in the 'FP_error_image' align with the current class definition. 
-        #     Also, highlight the distinguishing features between the 'correct_image' and 'FP_error_image' in order to accurately represent the '{class_name}' class.
-        #     Afterward, refine and enhance the class definition to improve its accuracy in identifying the '{class_name}' class by taking into consideration the critique and feedback from the analysis.
-
-        #     Return the updated class definition in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        #     Do not mention bounding boxes, colors, or image annotations in your response.
-
-        #     Class definition of the '{class_name}' class: {current_instructions}\n
-        # """
-
-        # f"""What sets apart the subject/object in the 'correct_image' shown in green bounding boxes from the subject/object in the 'FP_error_image' shown in red bounding boxes?
-        #     List the key visual differences that distinguish the two.
-
-        #     Now modify the class definition for the '{class_name}' class to better capture these distinguishing features,
-        #     so that the model can more accurately identify the '{class_name}' class and avoid false positives like the one seen in the 'FP_error_image'.
-
-        #     Return the updated class definition in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        #     Do not mention bounding boxes, colors, or image annotations in your response.
-
-        #     Class definition of the '{class_name}' class: {current_instructions}\n
-        # """
-
-        # },
-        # {"type": "text", "text": f"Here is the 'correct_image' showing the '{class_name}' class in green bounding boxes:"},
-        # {"type": "image", "image": correct_image["image_path"]},
-        # {"type": "text", "text": f"Here is the 'FP_error_image' showing the false positive for the '{class_name}' class in red bounding boxes:"},
-        # {"type": "image", "image": FP_error_image["image_path"]}
-
-        #  f"""What sets apart the subject/object shown in green bounding boxes from the subject/object shown in red bounding boxes?
-        #     List the key visual differences that distinguish the two.
-
-        #     Now modify the class definition for the '{class_name}' class to better capture these distinguishing features,
-        #     so that the model can more accurately identify the '{class_name}' class and avoid false positives like the one seen in the 'FP_error_image'.
-
-        #     Return the updated class definition in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        #     Do not mention bounding boxes, colors, or image annotations in your response.
-
-        #     Class definition of the '{class_name}' class: {current_instructions}\n
-        # """
-
-
-        #  f"""What sets apart the subject/object shown in green bounding box from the subject/object shown in red bounding box?
-        #     List the key visual differences that distinguish the two.
-
-        #     Now modify the class definition for the '{class_name}' class of the object in green bounding box to better capture these distinguishing features,
-        #     so that the model can more accurately identify the '{class_name}' class and avoid false positive detection like the one seen in the red bounding box.
-
-        #     Return the updated class definition in descriptive text in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        #     Do not mention bounding boxes, or bounding box colors, or image annotations in your response.
-
-        #     Class definition of the '{class_name}' class: {current_instructions}\n
-        # """
-
-
-        # f"""What sets apart the subject/object shown in green bounding box from the subject/object shown in red bounding box?
-        #     List the key visual differences that distinguish the two.
-
-        #     Come up with a class definition for the object in green bounding box inorder to identify and distinguish it from the object in red bounding box.
-        #     Your definition should focus on the key visual features that differentiate the two objects.
-
-        #     Now compare your class definition with the given class definition for the '{class_name}' class of the object in green bounding box. 
-        #     Now given an updated class definition for the '{class_name}' class of the object in green bounding box resulting from your analysis of both the definitions,
-        #     so that we can more accurately and easily identify the '{class_name}' class shown in green bounding box and avoid false positive detection like the one seen in the red bounding box.
-
-        #     Return the updated class definition in descriptive text in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        #     Do not mention bounding boxes, or bounding box colors, or image annotations in your response.
-
-        #     Class definition of the '{class_name}' class: {current_instructions}\n
-        # """
-
-        # f"""
-        #     Analyze the image carefully and identify the key visual differences between the object shown in the green bounding box and the one shown in the red bounding box.
-
-        #     1. Describe the distinguishing visual characteristics that set apart the object in the green bounding box from the object in the red bounding box.
-        #     2. Based on these distinguishing traits, formulate a clear and descriptive class definition for the object in the green bounding box. This definition should focus on its unique visual and contextual features that help differentiate it from the object in the red bounding box.
-        #     3. Compare your new class definition with the existing definition of the '{class_name}' class provided below:
-        #     {current_instructions}
-        #     4. Synthesize both definitions to produce an improved, more precise class definition for the '{class_name}' class. The updated definition should make it easier to accurately identify true instances of the '{class_name}' class while reducing false positives similar to the one seen in the red bounding box.
-
-        #     Return the final updated class definition as descriptive text in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
-
-        # """
 
 
         f"""
@@ -2061,8 +1535,6 @@ def generate_class_definition_withFN(args, model, processor, class_name, current
     # set_seed(args.seed)
 
     content = [
-        # {"type": "text", "text": f"Based on the following example images showing '{class_name}', describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
-        # {"type": "text", "text": f"Based on the following example images showing '{class_name}' in green bounding boxes, describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
         {"type": "text", "text": 
 
         f"""
@@ -2146,7 +1618,7 @@ def extract_class_definition(response, class_name):
 
 
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
-                                    use_streamlit=False, num_samples=None):
+                                    num_samples=None):
     
     """
     Performs iterative prompt refinement.
@@ -2158,8 +1630,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
     set_seed(args.seed)
 
-    if use_streamlit:
-        st.header("Iterative Prompt Refinement")
     
     # Initial setup
     # readme_path = os.path.join(dataset_path, "README.roboflow.txt")
@@ -2195,8 +1665,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     print(f"Categories in {dataset_name}: {cat_dict}")
 
     if num_samples is not None:
-        if use_streamlit:
-            st.warning(f"Note: Using num_samples={num_samples} may limit the ground-truth examples available for generating initial class definitions.")
         print(f"[Warning!] Limiting to {num_samples} samples per class for iterative prompt refinement.")
 
         # Ensure we don't request more samples than available
@@ -2246,8 +1714,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     os.makedirs(dataset_result_dir, exist_ok=True)
 
     # --- Step 0: Generate initial class definitions from all GT examples ---
-    st.subheader("Step 0: Generating Initial Class Definitions from All GT Examples")
-    
     
     refined_class_instructions_json = {}
     for cat_id in ds_cat_ids: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
@@ -2258,8 +1724,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
         # --- Step 0: Generate class definition using positive samples only ---
-        if use_streamlit:
-            st.markdown(f"**Generating initial definition for '{class_name}'...**")
         
 
         # Get all GT examples for this class
@@ -2340,10 +1804,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         initial_instructions = getInstructionsForClass(class_name, class_instructions_json)
 
         #Show initial instructions
-        if use_streamlit:
-            st.markdown(f"**Original definition for class '{class_name}':**")
-            st.write(initial_instructions)
-
+        
         #Save initial instructions as text file
         org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
         with open(org_instructions_path, "w", encoding="utf-8") as f:
@@ -2355,16 +1816,10 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         if len(gt_examples_for_class) != 10:
             print(f"Warning! GT examples count does not match expected number - 10!")
         
-        # Display a few of the examples being used
-        cols = st.columns(min(10, len(examples_to_use)))
-        for idx, ex in enumerate(examples_to_use):
-            cols[idx].image(ex["image_path"], caption=f"GT Example for {class_name}", width=150)
-
+        
         # Generate the definition
         initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
-        if use_streamlit:
-            st.text_area(f"Generated Initial Definition for '{class_name}'", initial_instructions, height=100, key=f"init_def_{class_name}")
-
+        
         # Save the generated initial instructions as text file
         init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_with_only_gt_definition.txt")
         with open(init_def_path, "w", encoding="utf-8") as f:
@@ -2373,9 +1828,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
         # --- Step 0: Generate class definition using negative samples ---
-        if use_streamlit:
-            st.markdown(f"**Generating initial definition for '{class_name}' by comparing with other classes...**")
-
+        
 
         # Get negative examples from other classes
         for idx, other_cat_id in enumerate(ds_cat_ids):
@@ -2429,39 +1882,23 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 positive_examples_for_class = random.choice(examples_to_use)
 
 
-            if use_streamlit:
-                st.markdown("**Examples from refinement:**")
-                cols = st.columns(2)
-                
-                img_with_boxes = Image.open(positive_examples_for_class["image_path"]).convert("RGB")
-                cols[0].image(img_with_boxes, caption=f"GT Example for {class_name}", width=300)
-                cols[1].image(other_img_with_boxes, caption=f"Negative Example from {other_class_name}", width=300)
-
-
             # --- Refine prompt for next iteration ---
-            with st.spinner(f"Idx {idx}: Refining class definition for '{class_name}' by comparing against {other_class_name}..."):
-
-                #False-positive focused refinement
-                fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
             
-                fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
+            #False-positive focused refinement
+            fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
+        
+            fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
 
-                if fp_generated_definition:
-                    initial_instructions = fp_generated_definition
+            if fp_generated_definition:
+                initial_instructions = fp_generated_definition
 
 
-                    # Save the generated initial instructions as text file
-                    init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
-                    with open(init_def_path, "w", encoding="utf-8") as f:
-                        f.write(initial_instructions)
+                # Save the generated initial instructions as text file
+                init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+                with open(init_def_path, "w", encoding="utf-8") as f:
+                    f.write(initial_instructions)
                         
-            if use_streamlit:
-            
-                st.text_area(f"Generated False-Positive based Class Definition Analysis by comparing against {other_class_name}", fp_generated_definition_analysis, height=400, key=f"{class_name}_gen_def_analysis_other_class_{other_class_name}_fp_{idx}")
-
-                st.markdown("**Refined Instructions for Next Iteration:**")
-                st.text_area(f"Instructions Iteration {idx+1}", initial_instructions, height=200, key=f"{class_name}_other_class_{other_class_name}_instr_{idx}")
-
+           
 
 
         # Save the generated initial instructions as text file
@@ -2481,9 +1918,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
         instruction_refinements = {}    
         for i in range(num_iterations):
-            if use_streamlit:
-                st.subheader(f"Iteration {i+1}/{num_iterations}")
-               
             
 
             # stats_type = "vqa_with_nms"
@@ -2492,60 +1926,43 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
             # --- Step 2: Evaluate with the current prompt ---
-            with st.spinner(f"Iteration {i+1}: Evaluating dataset..."):
-                run_name = f"ipt_iter_{i}"
+            run_name = f"ipt_iter_{i}"
+            
+            # UI placeholders for live visualization
+            
+            # Get the number of samples for the progress bar
+            # temp_coco = COCO(os.path.join(dataset_path, "train", "_annotations.coco.json"))
+            # num_eval_samples = len(temp_coco.dataset["images"])
+            # del temp_coco
+            num_eval_samples = len(coco_gt.dataset["images"])
+
+            current_instructions_json = {class_name: current_instructions}
+
+            #Get current seed state - to restore after evaluation - as evaluation changes it
+            seed_state = get_seed_state()
+
+            eval_generator = evaluate_dataset(
+                args, model, processor, dataset_path,
+                no_instructions=False,  # We are using generated instructions
+                few_shot_examples=False, # Few-shot examples were used for definition generation
+                run_name=run_name,
+                output_dir=dataset_result_dir,
+                # dataset_instructions_override_json=current_instructions,
+                dataset_instructions_override_json=current_instructions_json,
+                eval_class_name=class_name,
+                eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
+                # max_samples=None  # Evaluate on the full dataset to get proper metrics
+                # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
+                coco_override=coco_gt if num_samples is not None else None # Pass the coco_gt with limited samples if applicable
+            )
+
+            #Restore seed state
+            set_seed_from_state(seed_state)
+            
+            all_results_for_iter = []
+            for j, result in enumerate(eval_generator):
+                all_results_for_iter.append(result)
                 
-                # UI placeholders for live visualization
-                if use_streamlit:
-                    st.markdown("---")
-                    st.markdown(f"**Live Predictions for Iteration {i+1} / Class '{class_name}'**")
-                    live_cols = st.columns(2)
-                    live_image_placeholder = live_cols[0].empty()
-                    live_info_placeholder = live_cols[1].empty()
-                    progress_bar = st.progress(0)
-
-                # Get the number of samples for the progress bar
-                # temp_coco = COCO(os.path.join(dataset_path, "train", "_annotations.coco.json"))
-                # num_eval_samples = len(temp_coco.dataset["images"])
-                # del temp_coco
-                num_eval_samples = len(coco_gt.dataset["images"])
-
-                current_instructions_json = {class_name: current_instructions}
-
-                #Get current seed state - to restore after evaluation - as evaluation changes it
-                seed_state = get_seed_state()
-
-                eval_generator = evaluate_dataset(
-                    args, model, processor, dataset_path,
-                    no_instructions=False,  # We are using generated instructions
-                    few_shot_examples=False, # Few-shot examples were used for definition generation
-                    run_name=run_name,
-                    output_dir=dataset_result_dir,
-                    # dataset_instructions_override_json=current_instructions,
-                    dataset_instructions_override_json=current_instructions_json,
-                    eval_class_name=class_name,
-                    eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
-                    # max_samples=None  # Evaluate on the full dataset to get proper metrics
-                    # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
-                    coco_override=coco_gt if num_samples is not None else None # Pass the coco_gt with limited samples if applicable
-                )
-
-                #Restore seed state
-                set_seed_from_state(seed_state)
-                
-                all_results_for_iter = []
-                for j, result in enumerate(eval_generator):
-                    all_results_for_iter.append(result)
-                    
-                    if use_streamlit:
-                        # Update UI with live results
-                        original_image = Image.open(result["image_path"]).convert("RGB")
-                        # img_with_boxes = draw_bboxes_with_labels_on_image(original_image, result["parsed_detections"], result["gt_anns"], result["cat_dict"])
-                        img_with_boxes = draw_bboxes_with_labels_on_image(original_image, result["all_detections"][stats_type], result["gt_anns"], result["cat_dict"])
-                        live_image_placeholder.image(img_with_boxes, caption=f"Sample {j+1}/{num_eval_samples}: {os.path.basename(result['image_path'])}", width="stretch")
-                        # live_info_placeholder.json(result["parsed_detections"])
-                        live_info_placeholder.json(result["all_detections"][stats_type])
-                        progress_bar.progress((j + 1) / num_eval_samples)
 
             # --- Display mAP and AR ---
 
@@ -2560,10 +1977,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 ap50_95 = all_stats_dict.get(stats_type, [0.0]*12)[0]
                 # ar100 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[8]
                 ar1 = all_stats_dict.get(stats_type, [0.0]*12)[6]
-                if use_streamlit:
-                    st.metric(label=f"mAP@.50-.95 ({stats_type}) for '{class_name}'", value=f"{ap50_95:.4f}")
-                    st.metric(label=f"AR@1 ({stats_type}) for '{class_name}'", value=f"{ar1:.4f}")
-
+                
                 print(f"Iteration {i} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
 
                 instruction_refinements[f"class_{class_name}_iter_{i}"] = {
@@ -2579,8 +1993,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
     
                 if ap50_95 < prev_mAP:
-                    if use_streamlit:
-                        st.warning(f"mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}) for class '{class_name}'. Reverting to previous instructions.")
                     print(f"Iteration {i} - Class '{class_name}': mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}). Reverting to previous instructions.")
                     current_instructions = prev_instructions
                     # continue  # Skip to next class without refining
@@ -2794,15 +2206,11 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             prev_worst_examples_map = worst_examples_map
             
             print(f"Worst examples selected for iteration {i+1}, class '{class_name}': \n{worst_examples_map}")
-            
-            if use_streamlit:
-                st.markdown("**Worst Performing Examples from this Iteration:**")
-                cols = st.columns(len(worst_examples_map))
-                
+                     
             few_shot_examples = {}
             for idx, (ex_type, ex) in enumerate(worst_examples_map.items()):
                 if ex is None:
-                    st.warning(f"No example found for {ex_type} in iteration {i+1} for class '{class_name}'.")
+                    print(f"No example found for {ex_type} in iteration {i+1} for class '{class_name}'.")
                     continue
 
                 img = Image.open(ex['image_path']).convert("RGB")
@@ -2841,77 +2249,60 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
                 few_shot_examples[ex_type] = {"image_path": img_viz_path}
 
-                if use_streamlit:    
-                    cols[idx].image(img_with_boxes, caption=caption, width=300)
-
 
 
 
             # --- Step 4: Refine prompt for next iteration ---
-            with st.spinner(f"Iteration {i+1}: Refining class definition for '{class_name}'..."):
-                # generated_definition = generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples)
-                
-                # Save the analysis text to a file
-                analysis_path = os.path.join(dataset_result_dir, f"{class_name}_analysis_iter_{i}.txt")
-                with open(analysis_path, "w", encoding="utf-8") as f:
-                    f.write(f"Analysis for class '{class_name}' at iteration {i+1}:\n\n")
-                    f.write(f"Current Instructions:\n{current_instructions}\n\n")
+            
+            # generated_definition = generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples)
+            
+            # Save the analysis text to a file
+            analysis_path = os.path.join(dataset_result_dir, f"{class_name}_analysis_iter_{i}.txt")
+            with open(analysis_path, "w", encoding="utf-8") as f:
+                f.write(f"Analysis for class '{class_name}' at iteration {i+1}:\n\n")
+                f.write(f"Current Instructions:\n{current_instructions}\n\n")
 
+                
+
+            fn_generated_definition, fp_generated_definition = None, None
+            #False-negative focused refinement
+            if 'best_match' in few_shot_examples and 'worst_fn' in few_shot_examples:
+                fn_generated_definition_analysis = generate_class_definition_withFN(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fn'])
+            
+                fn_generated_definition = extract_class_definition(fn_generated_definition_analysis, class_name)
+
+                if fn_generated_definition:
+                    # prev_instructions = current_instructions
+                    current_instructions = fn_generated_definition
                     
+                    with open(analysis_path, "a", encoding="utf-8") as f:
+                        f.write(f"Generated Analysis for False-Negative based Class Definition:\n{fn_generated_definition_analysis}\n\n")
 
-                fn_generated_definition, fp_generated_definition = None, None
-                #False-negative focused refinement
-                if 'best_match' in few_shot_examples and 'worst_fn' in few_shot_examples:
-                    fn_generated_definition_analysis = generate_class_definition_withFN(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fn'])
-                
-                    fn_generated_definition = extract_class_definition(fn_generated_definition_analysis, class_name)
+            #False-positive focused refinement
+            if 'best_match' in few_shot_examples and 'worst_fp' in few_shot_examples:
+                fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fp'])
+            
+                fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
 
-                    if fn_generated_definition:
-                        # prev_instructions = current_instructions
-                        current_instructions = fn_generated_definition
-                        
-                        with open(analysis_path, "a", encoding="utf-8") as f:
-                            f.write(f"Generated Analysis for False-Negative based Class Definition:\n{fn_generated_definition_analysis}\n\n")
+                if fp_generated_definition:
+                    # if not fn_generated_definition: #Only update prev_instructions if FN refinement was not done
+                    #     prev_instructions = current_instructions
+                    current_instructions = fp_generated_definition
 
-                #False-positive focused refinement
-                if 'best_match' in few_shot_examples and 'worst_fp' in few_shot_examples:
-                    fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fp'])
-                
-                    fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
-    
-                    if fp_generated_definition:
-                        # if not fn_generated_definition: #Only update prev_instructions if FN refinement was not done
-                        #     prev_instructions = current_instructions
-                        current_instructions = fp_generated_definition
-
-                        with open(analysis_path, "a", encoding="utf-8") as f:
-                            f.write(f"Generated Analysis for False-Positive based Class Definition:\n{fp_generated_definition_analysis}\n\n")
-                            f.write(f"Refined Instructions:\n{current_instructions}\n")
+                    with open(analysis_path, "a", encoding="utf-8") as f:
+                        f.write(f"Generated Analysis for False-Positive based Class Definition:\n{fp_generated_definition_analysis}\n\n")
+                        f.write(f"Refined Instructions:\n{current_instructions}\n")
 
             # Display the analysis
-            if use_streamlit:
-    
-                st.markdown("**Generated Class Definition Analysis:**")
-                st.text_area(f"Generated False-Negative based Class Definition Analysis for Iteration {i+1}", fn_generated_definition_analysis, height=400, key=f"{class_name}_gen_def_analysis_fn_{i}")
-                st.text_area(f"Generated False-Positive based Class Definition Analysis for Iteration {i+1}", fp_generated_definition_analysis, height=400, key=f"{class_name}_gen_def_analysis_fp_{i}")
-
-                st.markdown("**Refined Instructions for Next Iteration:**")
-                st.text_area(f"Instructions Iteration {i+1}", current_instructions, height=200, key=f"{class_name}_instr_{i}")
-
+            
 
         #Display Initial Instructions
-        if use_streamlit:
-            st.subheader("Initial Instructions")
-            st.text_area("Initial Instructions", initial_instructions, height=200)
-
+        
         print(f"Initial instructions: \n{initial_instructions}")
 
         #Display Final Refined Instructions
 
-        if use_streamlit:
-            st.subheader("Final Refined Instructions")
-            st.text_area("Final Refined Instructions", current_instructions, height=200)
-
+        
         print(f"Final refined instructions: \n{current_instructions}")
 
         #Save final refined instructions
@@ -2922,11 +2313,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
         instruction_refinements["final_refined_instructions"] = current_instructions
 
-
-        if use_streamlit:
-            #Display and save best instructions
-            st.subheader("Best Instructions Achieved During Iterations")
-            st.text_area("Best Instructions", best_instructions, height=200)
 
         print(f"Best instructions achieved during iterations (mAP: {best_mAP:.4f}): \n{best_instructions}")
 
@@ -2946,10 +2332,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
         refined_class_instructions_json[class_name] = best_instructions
-
-    if use_streamlit:
-        st.subheader("All Refined Class Instructions")
-        st.json(refined_class_instructions_json)
 
 
     # Save all refined class instructions
@@ -2988,195 +2370,20 @@ def format_coco_metrics(stats):
         
     return formatted_string
 
-def run_streamlit_app(args):
-    st.set_page_config(layout="wide", page_title="Qwen-VL Benchmark")
-    st.title("Qwen 2.5-VL on RF100-VL Datasets")
-
-    with st.sidebar:
-        st.header("Evaluation Settings")
-        # root_dir = st.text_input("Datasets Root Directory", "../rf100-vl/"
-        # root_dir = st.text_input("Datasets Root Directory", "./datasets/rf100-vl/")
-        root_dir = st.text_input("Datasets Root Directory", "./datasets/rf100-vl-fsod/")
-        
-        if not os.path.isdir(root_dir):
-            st.error("Datasets root directory not found.")
-            st.stop()
-
-        dataset_options = sorted([d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))])
-
-        # Filter dataset options to only those in rf20_datasets
-        rf20_data_path = "./code/rf100vl/qwen-2.5-vl-rf-fsod-master/datasets_links_fixed.csv"
-        rf20_datasets = pd.read_csv(rf20_data_path, header=None).values.flatten().tolist()[1:] #Skip header
-        rf20_datasets = [i.split('/')[-2] for i in rf20_datasets]
-        assert len(rf20_datasets) == 20, "Expected 20 datasets in rf20_datasets"
-
-        filtered_dataset_paths = []
-        for ds_path in dataset_options:
-            for rf20 in rf20_datasets:
-                if ds_path in rf20:
-                    filtered_dataset_paths.append(ds_path)
-                    break
-
-        dataset_options = filtered_dataset_paths
-        assert len(dataset_options) == 20, "Expected 20 datasets in dataset_paths after filtering"
-
-
-        selected_dataset = st.selectbox("Select Dataset", dataset_options)
-        
-        num_samples = st.number_input("Number of samples to evaluate", 1, 1000, 1)
-        
-        
-        st.header("Inference Settings")
-        no_instructions = st.checkbox("No Instructions", value=args.no_instructions)
-        few_shot = st.checkbox("Few-shot Examples", value=args.few_shot)
-        # vqa_rescore = st.checkbox("VQA-based Re-scoring", value=args.vqa_rescore)
-        vqa_rescore = st.checkbox("VQA-based Re-scoring", value=True)
-        # apply_nms = st.checkbox("Apply NMS", value=args.apply_nms)
-        apply_nms = st.checkbox("Apply NMS", value=True)
-        nms_threshold = st.slider("NMS Threshold", 0.0, 1.0, 0.5, 0.05, help="IoU threshold for Non-Maximum Suppression. Higher values allow more overlap.")
-        class_rescore = st.checkbox("VQA-based Class Re-scoring", value=args.class_rescore)
-        show_labels = st.checkbox("Show Labels on Images", value=True)
-        
-        output_dir = st.text_input("Output Directory", value=args.output_dir)
-        
-        seed = st.number_input("Random Seed", 0, 99999, value=args.seed)
-
-        # st.header("Prompt Tuning")
-        # prompt_tuning_mode = st.checkbox("Enable Prompt Tuning")
-        # custom_prompt = st.text_area("Custom Prompt Template", "Detect all of the subjects or objects that can be referred as '{class_name}' in the image and return their locations coordinates, as a list of items like {{\"bbox_2d\":[x_min,y_min,x_max,y_max],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}.", height=150)
-
-        st.header("Iterative Prompt Tuning (IPT)")
-        # ipt_mode = st.checkbox("Enable Iterative Prompt Tuning", value=args.ipt_mode)
-        ipt_mode = st.checkbox("Enable Iterative Prompt Tuning", value=True)
-        num_ipt_iterations = st.number_input("Number of IPT Iterations", 1, 20, 10)
-
-        start_button = st.button("Start Evaluation")
-
-    if start_button:
-        st.header(f"Evaluating: {selected_dataset}")
-        # Update args from UI
-        args.no_instructions = no_instructions
-        args.few_shot = few_shot
-        args.vqa_rescore = vqa_rescore
-        args.apply_nms = apply_nms
-        args.nms_threshold = nms_threshold
-        args.class_rescore = class_rescore
-        args.show_labels = show_labels
-        args.output_dir = output_dir
-        args.seed = seed
-
-        args.ipt_mode = ipt_mode
-
-        # Load model
-        with st.spinner("Loading Qwen model..."):
-            # Use a key to ensure the cached resource is re-evaluated if device changes, though not user-configurable in UI here.
-            model, processor = load_qwen_model_cached(qwen_device="cuda:0")
-
-        if args.ipt_mode:
-            # Run the iterative prompt refinement process
-            dataset_path = os.path.join(root_dir, selected_dataset)
-            dataset_instructions_override_json = iterative_prompt_refinement(
-                args,
-                model=model,
-                processor=processor,
-                dataset_path=dataset_path,
-                num_iterations=num_ipt_iterations,
-                use_streamlit=True,
-                num_samples=num_samples
-            )
-
-
-        # Set seed for reproducibility
-        set_seed(seed)
-
-        # Prepare dataset paths
-        dataset_path = os.path.join(root_dir, selected_dataset)
-
-        # UI Placeholders
-        progress_bar = st.progress(0)
-        st.header("Live Results")
-        
-        col1, col2 = st.columns(2)
-        image_placeholder = col1.empty()
-        info_placeholder = col2.empty()
-        few_shot_placeholder = st.empty()
-
-        run_name = "_".join(filter(None, [args.no_instructions and "noinstr", args.few_shot and "fewshot", args.vqa_rescore and "vqa", args.class_rescore and "cls_rescore", args.apply_nms and f"nms{args.nms_threshold}"])) or "default"
-        eval_generator = evaluate_dataset(
-            args, model, processor, dataset_path, 
-            no_instructions=args.no_instructions, 
-            few_shot_examples=args.few_shot, 
-            run_name=run_name, 
-            output_dir=args.output_dir,
-            max_samples=num_samples,
-            dataset_instructions_override_json=dataset_instructions_override_json if args.ipt_mode else None
-        )
-
-        # Loop through the generator to get live results
-        for i, result in enumerate(eval_generator):
-            # Visualization
-            original_image = Image.open(result["image_path"]).convert("RGB")
-            if args.show_labels:
-                img_with_boxes = draw_bboxes_with_labels_on_image(original_image, result["parsed_detections"], result["gt_anns"], result["cat_dict"])
-            else:
-                img_with_boxes = draw_bboxes_on_image(original_image, result["pred_bboxes"], result["gt_bboxes"])
-            
-
-            image_placeholder.image(img_with_boxes, caption=f"Sample {i+1}/{num_samples}: {os.path.basename(result['image_path'])}", width="stretch")
-
-            info_text = f"**Qwen Output:**\n```\n{result['raw_output']}\n```\n\n"
-            info_text += f"**Parsed Detections:**\n```json\n{json.dumps(result['parsed_detections'], indent=2)}\n```"
-            
-            info_placeholder.markdown(info_text)
-            
-            # Also show bboxes before NMS if NMS was applied
-            if args.apply_nms:
-                info_placeholder.markdown(f"**Parsed Detections (before NMS):**\n```json\n{json.dumps(result['parsed_detections_before_nms'], indent=2)}\n```")
-
-            # Display few-shot examples if they were used
-            if result.get("few_shot_examples_used"):
-                with few_shot_placeholder.container():
-                    st.subheader("Few-shot Examples Used for this Sample")
-                    fs_cols = st.columns(len(result["few_shot_examples_used"]))
-                    for idx, fs_example in enumerate(result["few_shot_examples_used"]):
-                        fs_image = Image.open(fs_example["viz_path"])
-                        fs_cols[idx].image(fs_image, caption=f"Example for: {fs_example['category_name']}")
-
-            # progress_bar.progress((i + 1) / num_samples)
-            progress_bar.progress((i + 1) / max(num_samples, i+1))
-
-        # Final evaluation
-        st.header("Final Evaluation Metrics")
-        # The final stats are now calculated inside evaluate_dataset, so we just need to display them.
-        # We can read the saved JSON file for this.
-        eval_dir = os.path.join(args.output_dir, "evaluations", run_name)
-        eval_results_path = os.path.join(eval_dir, f"evaluation_{selected_dataset}.json")
-        if os.path.exists(eval_results_path):
-            with open(eval_results_path, 'r') as f:
-                all_stats_dict = json.load(f)
-
-            st.subheader("COCO Metrics Comparison")
-
-            # Create a DataFrame for easy comparison
-            df_data = {
-                "Metric": ["AP@.50:.95", "AP@.50"],
-                "Original Score (no NMS)": [all_stats_dict["orig_no_nms"][0], all_stats_dict["orig_no_nms"][1]],
-                "Original Score (w/ NMS)": [all_stats_dict["orig_with_nms"][0], all_stats_dict["orig_with_nms"][1]],
-                "VQA Score (no NMS)": [all_stats_dict["vqa_no_nms"][0], all_stats_dict["vqa_no_nms"][1]],
-                "VQA Score (w/ NMS)": [all_stats_dict["vqa_with_nms"][0], all_stats_dict["vqa_with_nms"][1]],
-            }
-            df = pd.DataFrame(df_data).set_index("Metric")
-            st.dataframe(df.style.format("{:.4f}"))
-
-            st.subheader("Detailed Metrics (VQA Score w/ NMS)")
-            st.text(format_coco_metrics(all_stats_dict["vqa_with_nms"]))
-        else:
-            st.warning("Could not find final evaluation file. The full run might have been interrupted or failed.")
 
 def run_single_dataset_evaluation(args):
     """
     Runs evaluation for a single dataset. This function is called by the dispatcher.
     """
+
+    if args.dataset_path:
+        root_dir = "./datasets/rf100-vl-fsod/"
+        if not os.path.isdir(root_dir):
+            print(f"Root directory not found: {root_dir}")
+            return
+        
+        args.dataset_path = os.path.join(root_dir, args.dataset_path)
+
     if not args.dataset_path or not os.path.isdir(args.dataset_path):
         print(f"Error: Invalid or missing --dataset_path: {args.dataset_path}")
         return
@@ -3199,13 +2406,6 @@ def run_single_dataset_evaluation(args):
 
     # os.makedirs(args.output_dir, exist_ok=True)
 
-    # root_dir = "datasets"
-    # root_dir = "../rf100-vl/"
-    # root_dir = "./datasets/rf100-vl/"
-    root_dir = "./datasets/rf100-vl-fsod/"
-    if not os.path.isdir(root_dir):
-        print(f"Root directory not found: {root_dir}")
-        return
 
     model, processor = load_qwen_model(device_map_auto=args.device_map_auto)
     model.eval()
@@ -3220,8 +2420,7 @@ def run_single_dataset_evaluation(args):
             model=model,
             processor=processor,
             dataset_path=args.dataset_path,
-            num_iterations=args.num_ipt_iterations,
-            use_streamlit=False,
+            num_iterations=args.num_ipt_iterations
         )
 
     # ds_stats = list(evaluate_dataset(args, model, processor, args.dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir))
@@ -3239,275 +2438,17 @@ def run_single_dataset_evaluation(args):
     else:
         print(f"Evaluation failed for {args.dataset_path}")
 
-def get_available_gpus():
-    """Detects available GPU IDs using torch.cuda."""
-    if not torch.cuda.is_available():
-        return []
-    return list(range(torch.cuda.device_count()))
-
-def worker_process_datasets(gpu_id, task_queue, args):
-    """
-    Worker function that runs on a specific GPU.
-    It loads the model once and then dynamically fetches datasets from the queue.
-    """
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    
-    # This function is now running in a separate process, so we need to set the device
-    # before loading the model.
-    if gpu_id != -1:
-        torch.cuda.set_device(gpu_id)
-        qwen_device=f"cuda:{gpu_id}"
-    else:
-        qwen_device="cpu"
-
-    print(f"[Worker on GPU {gpu_id}] Loading model...")
-    # model, processor = load_qwen_model()
-    model, processor = load_qwen_model(qwen_device, device_map_auto=args.device_map_auto)
-    model.eval()
-    print(f"[Worker on GPU {gpu_id}] Model loaded.")
-
-    run_modes = []
-    if args.no_instructions: run_modes.append("noinstr")
-    if args.few_shot: run_modes.append("fewshot")
-    if args.vqa_rescore: run_modes.append("vqa")
-    if args.class_rescore: run_modes.append("cls_rescore")
-    run_name = "_".join(run_modes) if run_modes else "default"
-
-    while not task_queue.empty():
-        try:
-            dataset_path = task_queue.get(timeout=1)
-            print(f"[Worker on GPU {gpu_id}] Processing dataset: {dataset_path}")
 
 
-            if args.ipt_mode:
-                # Run the iterative prompt refinement process
-                dataset_instructions_override_json = iterative_prompt_refinement(
-                    args,
-                    model=model,
-                    processor=processor,
-                    dataset_path=dataset_path,
-                    num_iterations=args.num_ipt_iterations,
-                    use_streamlit=False,
-                )
-
-            # The generator needs to be consumed fully to run the evaluation
-            eval_generator = evaluate_dataset(args, model, processor, dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir,
-                                               dataset_instructions_override_json=dataset_instructions_override_json if args.ipt_mode else None)
-            for _ in eval_generator:
-                pass # Consume the generator
-        except Exception as e: # Catch queue.Empty or other exceptions
-            print(f"[Worker on GPU {gpu_id}] Queue is empty or an error occurred: {e}. Exiting.")
-            break
-
-def run_cli_evaluation(args):
-
-    #Create output directories
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # # --- Iterative Prompt Tuning (IPT) Mode ---
-    # if args.ipt_mode:
-    #     if not args.dataset_path:
-    #         print("Error: --dataset_path must be specified when using --ipt_mode.")
-    #         return
-
-    #     print("--- Running in Iterative Prompt Tuning (IPT) Mode ---")
-    #     root_dir = "./datasets/rf100-vl-fsod/"
-    #     dataset_path = os.path.join(root_dir, args.dataset_path)
-        
-    #     model, processor = load_qwen_model(device_map_auto=args.device_map_auto)
-        
-    #     iterative_prompt_refinement(
-    #         args, model, processor, dataset_path, 
-    #         num_iterations=args.num_ipt_iterations, 
-    #     )
-    #     print("--- IPT Mode Finished ---")
-    #     return
-
-    # If a single dataset is specified, run it directly.
-    if args.dataset_path:
-        root_dir = "./datasets/rf100-vl-fsod/"
-        args.dataset_path = os.path.join(root_dir, args.dataset_path)
-        run_single_dataset_evaluation(args)
-        return
-
-    # --- Dispatcher Logic ---
-    available_gpus = get_available_gpus()
-    if args.gpu_ids:
-        # Filter available GPUs by user-provided list
-        gpu_ids = [g for g in available_gpus if g in args.gpu_ids]
-        if not gpu_ids:
-             print(f"Error: None of the specified GPUs {args.gpu_ids} are available. Available GPUs: {available_gpus}")
-             return
-    else:
-        gpu_ids = available_gpus
-
-    print(f"Using GPUs: {gpu_ids}")
-    
-    if not gpu_ids:
-        print("No GPUs available. Running sequentially on CPU.")
-        gpu_ids = [-1] # Use -1 to signify CPU
-
-
-    # root_dir = "../rf100-vl/"
-    # root_dir = "./datasets/rf100-vl/"
-    root_dir = "./datasets/rf100-vl-fsod/"
-    if not os.path.isdir(root_dir):
-        print(f"Root directory not found: {root_dir}")
-        return
-
-    dataset_paths = []
-    for entry in os.scandir(root_dir):
-        if entry.is_dir():
-            dataset_paths.append(entry.path)
-
-    all_stats = []
-    dataset_results = []
-
-    #Open csv file
-    rf20_data_path = "./code/rf100vl/qwen-2.5-vl-rf-fsod-master/datasets_links_fixed.csv"
-    rf20_datasets = pd.read_csv(rf20_data_path, header=None).values.flatten().tolist()[1:] #Skip header
-    rf20_datasets = [i.split('/')[-2] for i in rf20_datasets]
-    assert len(rf20_datasets) == 20, "Expected 20 datasets in rf20_datasets"
-
-    filtered_dataset_paths = []
-    for ds_path in dataset_paths:
-        for rf20 in rf20_datasets:
-            if ds_path.split('/')[-1] in rf20:
-                filtered_dataset_paths.append(ds_path)
-                break
-
-    dataset_paths = filtered_dataset_paths
-    assert len(dataset_paths) == 20, "Expected 20 datasets in dataset_paths after filtering"
-
-    dataset_paths_org = dataset_paths.copy()
-
-    #Check existing eval files and skip those datasets
-    run_modes = []
-    if args.no_instructions: run_modes.append("noinstr")
-    if args.few_shot: run_modes.append("fewshot")
-    if args.vqa_rescore: run_modes.append("vqa")
-    if args.class_rescore: run_modes.append("cls_rescore")
-    run_name = "_".join(run_modes) if run_modes else "default"
-
-    dataset_paths_to_process = [] #grg_changed
-    for dataset_path in dataset_paths: #grg_changed
-        # Check for the final evaluation file to determine if the dataset has been fully processed.
-        if os.path.isfile(os.path.join(
-            args.output_dir, "evaluations", run_name, f"evaluation_{os.path.basename(dataset_path)}.json"
-        )):
-            print(f"Skipping {os.path.basename(dataset_path)} as predictions already exist.")
-            continue
-        dataset_paths_to_process.append(dataset_path)
-
-    dataset_paths = dataset_paths_to_process
-    print(f"Datasets to process ({len(dataset_paths)}): {[os.path.basename(p) for p in dataset_paths]}")
-    
-    # --- Process Pool for Dispatching ---
-    from multiprocessing import Process
-    import multiprocessing as mp
-
-    num_gpus = len(gpu_ids)
-    
-    # Create a shared queue and add all datasets to it
-    task_queue = mp.Queue()
-    for ds_path in dataset_paths:
-        task_queue.put(ds_path)
-
-    processes = []
-    # Use 'spawn' to avoid CUDA initialization issues in forked processes
-    # This is crucial when using CUDA with multiprocessing
-    mp.set_start_method('spawn', force=True)
-
-    for i, gpu_id in enumerate(gpu_ids):
-        p = Process(target=worker_process_datasets, args=(gpu_id, task_queue, args))
-        processes.append(p)
-        p.start()
-    for p in processes:
-        p.join()
-
-    print("\nAll dataset evaluations have been dispatched.")
-
-    # --- Aggregation of results ---
-    print("\nAggregating results...")
-    run_modes = []
-    if args.no_instructions:
-        run_modes.append("noinstr")
-    if args.few_shot:
-        run_modes.append("fewshot")
-    if args.vqa_rescore:
-        run_modes.append("vqa")
-    if args.class_rescore:
-        run_modes.append("cls_rescore")
-    if args.apply_nms:
-        run_modes.append(f"nms{args.nms_threshold}")
-    run_name = "_".join(run_modes) if run_modes else "default"
-
-    eval_files = glob.glob(os.path.join(args.output_dir, "evaluations", run_name, "evaluation_*.json"))
-    eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
-    all_stats_by_type = {eval_type: [] for eval_type in eval_types}
-    dataset_results = []
-
-    for eval_file in eval_files:
-        with open(eval_file, 'r') as f:
-            all_stats_dict = json.load(f)
-        
-        for eval_type, stats_list in all_stats_dict.items():
-            all_stats_by_type[eval_type].append(stats_list)
-
-        dataset_results.append({
-            "dataset_name": os.path.basename(eval_file).replace("evaluation_", "").replace(".json", ""),
-            "stats": all_stats_dict
-        })
-
-    if any(all_stats_by_type.values()):
-        print("=" * 80)
-        print(f"Average Metrics Across {len(eval_files)} Datasets")
-        print("=" * 80)
-
-        header = f"{'Metric':<12} | {'Orig (no NMS)':<15} | {'Orig (w/ NMS)':<15} | {'VQA (no NMS)':<15} | {'VQA (w/ NMS)':<15}"
-        print(header)
-        print("-" * len(header))
-
-        mean_stats_all_types = {
-            eval_type: np.mean(stats, axis=0) for eval_type, stats in all_stats_by_type.items() if stats
-        }
-
-        ap_50_95_line = f"{'AP@.50:.95':<12} | "
-        ap_50_line =    f"{'AP@.50':<12} | "
-        for eval_type in eval_types:
-            stats = mean_stats_all_types.get(eval_type, [0.0] * 12)
-            ap_50_95_line += f"{stats[0]:<15.4f} | "
-            ap_50_line +=    f"{stats[1]:<15.4f} | "
-        
-        print(ap_50_95_line)
-        print(ap_50_line)
-        print("=" * 80)
-
-        dataset_results.append({
-            "dataset_name": "average",
-            "stats": {eval_type: stats.tolist() for eval_type, stats in mean_stats_all_types.items()}
-        })
-
-        save_path = os.path.join(args.output_dir, f"all_datasets_metrics_{run_name}.json")
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(dataset_results, f, indent=2)
-        print(f"\nSaved all dataset metrics + averages to {save_path}.")
-
-    else:
-        print("No evaluation files found to aggregate.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--eval", action="store_true", help="Run evaluation from CLI instead of Streamlit UI.")
     parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
     parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
-    # parser.add_argument("--output_dir", type=str, default="results/rf100vl/rf20_tmp1f", help="Directory to save results and visuals.")
     parser.add_argument("--output_dir", type=str, default="results/rf100vl_IPT/rf20_IPT_singleclass_codePrompt_vqaScoreFixed_classRescoreFix_withNMS_v1_instr", help="Directory to save results and visuals.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
-    # parser.add_argument('--vqa_batch_size', type=int, default=32, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument("--vqa_rescore", action="store_true", help="Use VQA-based re-scoring of candidate masks")
     parser.add_argument("--apply_nms", action="store_true", help="Apply Non-Maximum Suppression to detections.")
@@ -3520,8 +2461,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.eval:
-        # The run_cli_evaluation function will handle setting the seed with the parsed args
-        run_cli_evaluation(args)
-    else:
-        run_streamlit_app(args)
+    run_single_dataset_evaluation(args)
