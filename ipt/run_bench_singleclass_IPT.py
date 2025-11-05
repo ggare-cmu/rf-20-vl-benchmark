@@ -395,6 +395,13 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
+        #For Qwen3-VL, Qwen3-VL's default coordinate system has been changed from the absolute coordinates used in Qwen2.5-VL to relative coordinates ranging from 0 to 1000. (You don't need to calculate the resized_w)
+        # Ref: https://github.com/QwenLM/Qwen3-VL/blob/main/cookbooks/2d_grounding.ipynb 
+        if not args.model_name.startswith("Qwen2.5-VL"):
+            input_height = 1000
+            input_width = 1000
+            assert args.model_name.startswith("Qwen3-VL")
+
         # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
         image = Image.open(image_path).convert("RGB")
         width, height = image.size

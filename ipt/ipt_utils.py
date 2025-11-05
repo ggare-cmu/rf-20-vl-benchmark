@@ -23,25 +23,30 @@ def load_qwen_model(model_name):
         attn_implementation="flash_attention_2",
         device_map="auto"
     )
-    # elif(model_name.startswith("Qwen3-VL-235B")):
-    #     print("Loading using Qwen3VLMoeForConditionalGeneration")
-    #     model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-    #         # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-    #         "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
-    #     ) 
+        
+    elif(model_name.startswith("Qwen3-VL-235B") or model_name.startswith("Qwen3-VL-30B")):
+        print("Loading using Qwen3VLMoeForConditionalGeneration")
+        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+            # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+            "Qwen/"+model_name, 
+            dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16, 
+            attn_implementation="flash_attention_2", device_map="auto"
+        ) 
+
     elif(model_name.startswith("Qwen3-VL")):
         print("Loading using Qwen3VLForConditionalGeneration")
-        # model = Qwen3VLForConditionalGeneration.from_pretrained(
-        #     "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-        # )
-
-        model = AutoModelForImageTextToText.from_pretrained(
-                        f"Qwen/{model_name}",
-                        trust_remote_code=True,
-                        dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
-                        attn_implementation="flash_attention_2",
-                        device_map="auto"
-                    )
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+        )
+        print("Loading using AutoModelForImageTextToText")
+        # model = AutoModelForImageTextToText.from_pretrained(
+        #                 f"Qwen/{model_name}",
+        #                 # trust_remote_code=True,
+        #                 dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
+        #                 attn_implementation="flash_attention_2",
+        #                 device_map="auto"
+        #             )
+    
     else:
         print("Error: Invalid model name")
         return None, None
@@ -50,6 +55,10 @@ def load_qwen_model(model_name):
     print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
 
     processor = AutoProcessor.from_pretrained("Qwen/"+model_name)
+    # processor = AutoProcessor.from_pretrained(
+    #                     f"Qwen/{model_name}", 
+    #                     # trust_remote_code=True
+    #                 )
     model.eval()
 
 
