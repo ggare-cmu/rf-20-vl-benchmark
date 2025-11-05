@@ -10,6 +10,7 @@ WORKDIR=$(pwd)
 
 # MODEL_NAME="Qwen2.5-VL-7B-Instruct" #Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct
 # MODEL_NAME="Qwen2.5-VL-72B-Instruct"
+# MODEL_NAME="Qwen3-VL-8B-Instruct"
 MODEL_NAME="Qwen3-VL-30B-A3B-Instruct"
 # MODEL_NAME="Qwen3-VL-235B-A22B-Instruct"
 
