@@ -1,6 +1,5 @@
 '''
-Run cmd: CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --class_rescore --no_instructions --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_new/rf20_singleclass_codePrompt_vqaScore_classRescore_nms0.5_v1 --gpu_ids 0 1 2 3 4 5 6 7
-Run cmd: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI.py --eval --vqa_rescore --few_shot --apply_nms --nms_threshold 0.5 --dataset_path wb-prova --output_dir results/rf100vl_fixedPadBug/rf20_singleclass_codePrompt_vqaScore_nms0.5_fewShot_v1 --device_map_auto
+Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1  --dataset_path wb-prova
 '''
 
 import os
@@ -24,7 +23,7 @@ import argparse
 import re
 import random
 
-import run_bench_singleclass_VQAscoring_webUI_multimetrics as evaluator
+import run_bench_singleclass_evaluator as evaluator
 
 
 def set_seed(seed):

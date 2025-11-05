@@ -1,28 +1,20 @@
 #!/bin/bash
 
-SESSION_NAME="rf100vl_eval_qwen_IPT_singleclass_zeroshot_perClsInstr_fixDetectScale_flashAtt2"
+SESSION_NAME="rf20_IPT_singleclass_vqaScore_withNMS"
 GPU_MEMORY_THRESHOLD=6000    # MB free memory needed to start a job
 CHECK_INTERVAL=20            # seconds between GPU memory checks
 WORKDIR="/scratch/ggare/Research/VLMattributeClassifier"
 
 # --- Configuration for job command ---
 
-# CUDA_VISIBLE_DEVICES=0 python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --eval --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_zeroshot/rf20_IPT_singleclass_codePrompt_vqaScore_nms0.5_numIters10_perClsInstr_fixDetectScale_flashAtt2 --vqa_batch_size 1
-RESULTSDIR="results/rf100vl_IPT_zeroshot/rf20_IPT_singleclass_codePrompt_vqaScore_nms0.5_numIters10_perClsInstr_fixDetectScale_flashAtt2"
-CMD_TEMPLATE="rb; python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --eval --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
-
-# RESULTSDIR="results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_vqaWithInstru"
-# CMD_TEMPLATE="rb; python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_vqaWithInstru.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir $RESULTSDIR --vqa_batch_size 1"
-
-# RESULTSDIR="results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_flashAtt2"
-# CMD_TEMPLATE="rb; /data3/shared/scripts/vnice/vnice.sh python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_flashAtt2.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir $RESULTSDIR --vqa_batch_size 1"
+# CUDA_VISIBLE_DEVICES=0 python ipt/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1
+RESULTSDIR="results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS"
+CMD_TEMPLATE="rb; python ipt/run_bench_singleclass_IPT.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
 # # CUDA_VISIBLE_DEVICES=0 /data3/shared/scripts/vnice/vnice.sh python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_flashAtt2.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_flashAtt2 --vqa_batch_size 1
 # RESULTSDIR="results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_fixDetectScale"
 # CMD_TEMPLATE="rb; /data3/shared/scripts/vnice/vnice.sh python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_fixDetectScale.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
-# RESULTSDIR="results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5_perClsInstr_fixDetectScale_flashAtt2"
-# CMD_TEMPLATE="rb; /data3/shared/scripts/vnice/vnice.sh python code/rf100vl/qwen-2.5-vl-rf-fsod-master/run_bench_singleclass_VQAscoring_webUI_multimetrics_fixDetectScale_flashAtt2.py --eval --vqa_rescore --apply_nms --nms_threshold 0.5 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
 # --- Create log directory ---
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
