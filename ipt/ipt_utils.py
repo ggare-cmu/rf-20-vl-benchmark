@@ -1,7 +1,7 @@
 
 import torch
 
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoModelForVision2Seq, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoModelForImageTextToText, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 from qwen_vl_utils import process_vision_info
 
 
@@ -35,7 +35,7 @@ def load_qwen_model(model_name):
         #     "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
         # )
 
-        model = AutoModelForVision2Seq.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
                         f"Qwen/{model_name}",
                         trust_remote_code=True,
                         dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
