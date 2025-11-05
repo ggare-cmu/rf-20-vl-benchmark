@@ -12,18 +12,19 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoModelForVision2Seq, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 from qwen_vl_utils import process_vision_info
 
 import time
 import gc
-from PIL import ImageDraw, ImageFont
+
 import numpy as np
 import argparse
 import re
 import random
 
 import run_bench_singleclass_evaluator as evaluator
+
+import ipt_utils as utils
 
 
 def set_seed(seed):
@@ -53,139 +54,6 @@ def set_seed_from_state(seed_state):
 
 
 
-def load_qwen_model(model_name):
-    
-   
-    model = None
-
-   
-    if(model_name.startswith("Qwen2.5-VL")): 
-        print("Loading using Qwen2_5_VLForConditionalGeneration")
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/"+model_name,
-        dtype= torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        device_map="auto"
-    )
-    # elif(model_name.startswith("Qwen3-VL-235B")):
-    #     print("Loading using Qwen3VLMoeForConditionalGeneration")
-    #     model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-    #         # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-    #         "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
-    #     ) 
-    elif(model_name.startswith("Qwen3-VL")):
-        print("Loading using Qwen3VLForConditionalGeneration")
-        # model = Qwen3VLForConditionalGeneration.from_pretrained(
-        #     "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-        # )
-
-        model = AutoModelForVision2Seq.from_pretrained(
-                        f"Qwen/{model_name}",
-                        trust_remote_code=True,
-                        torch_dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
-                        attn_implementation="flash_attention_2",
-                        device_map="auto"
-                    )
-    else:
-        print("Error: Invalid model name")
-        return None, None
-
-
-    print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
-
-    processor = AutoProcessor.from_pretrained("Qwen/"+model_name)
-    model.eval()
-
-
-
-    print("processor.tokenizer.padding_side:", processor.tokenizer.padding_side)
-    print("processor.tokenizer.pad_token:", processor.tokenizer.pad_token)
-    print("processor.tokenizer.eos_token:", processor.tokenizer.eos_token)
-
-    # ✅ Fix padding side and pad token
-    tokenizer = processor.tokenizer  # access the underlying tokenizer
-
-    tokenizer.padding_side = "left"  # left padding for decoder-only models
-
-
-    # 2. Keep "<|endoftext|>" as pad token (already set)
-    # Do NOT overwrite with eos_token ("<|im_end|>")
-
-    # # Ensure PAD token exists
-    # if tokenizer.pad_token is None:
-    #     tokenizer.pad_token = tokenizer.eos_token
-
-    # Save these updates into the processor so it uses them
-    processor.tokenizer = tokenizer
-
-    print("processor.tokenizer.padding_side:", processor.tokenizer.padding_side)
-    print("processor.tokenizer.pad_token:", processor.tokenizer.pad_token)
-    print("processor.tokenizer.eos_token:", processor.tokenizer.eos_token)
-
-
-    # Optionally, if you want to persist this behavior for future loads:
-    # processor.save_pretrained("./qwen2_5_vl_leftpad")
-
-    return model, processor
-
-
-
-def draw_bboxes_on_image(image, pred_bboxes, gt_bboxes):
-    """
-    Draws predicted bboxes (red) and ground-truth bboxes (green) on the image.
-    Returns a new PIL image with the boxes drawn.
-    Bboxes should be [x, y, w, h] in image coordinates.
-    """
-    img_copy = image.copy()
-    draw = ImageDraw.Draw(img_copy)
-
-    # GT in green
-    for (x, y, w, h) in gt_bboxes:
-        draw.rectangle([(x, y), (x + w, y + h)], outline="green", width=8)
-
-    # Pred in red
-    for (x, y, w, h) in pred_bboxes:
-        draw.rectangle([(x, y), (x + w, y + h)], outline="red", width=8)
-
-    return img_copy
-
-
-
-def draw_colored_bboxes_on_image(image, color, bboxes):
-    """
-    Draws colored bboxes on the image.
-    Returns a new PIL image with the boxes drawn.
-    Bboxes should be [x, y, w, h] in image coordinates.
-    """
-    img_copy = image.copy()
-    draw = ImageDraw.Draw(img_copy)
-
-    for (x, y, w, h) in bboxes:
-        draw.rectangle([(x, y), (x + w, y + h)], outline=color, width=8)
-
-    return img_copy
-
-
-
-def visualize_bboxes(image_path, pred_bboxes, gt_bboxes, save_path):
-    """
-    Draw predicted bboxes in red, ground-truth bboxes in green on the image 
-    and save to save_path.
-    Bboxes should be [x, y, w, h] in image coordinates.
-    """
-    image = Image.open(image_path).convert("RGB")
-    img_with_boxes = draw_bboxes_on_image(image, pred_bboxes, gt_bboxes)
-    img_with_boxes.save(save_path)
-    print(f"Saved visualization to {save_path}")
-
-def create_img_with_bbox(original_image, bbox_xywh):
-    """Draws a single red bounding box on an image."""
-    img_with_bbox = original_image.copy()
-    draw = ImageDraw.Draw(img_with_bbox)
-    x, y, w, h = bbox_xywh
-    bbox_xyxy = [x, y, x + w, y + h]
-    draw.rectangle(bbox_xyxy, outline='red', width=3)
-    return img_with_bbox
 
 
 def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, prompt_list, pil_images: list, batch_size: int = 8):
@@ -559,7 +427,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         original_image = Image.open(image_path).convert("RGB")
         
         # Create a list of images, each with one bounding box drawn
-        vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
+        vqa_images = [utils.create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
         
         # Get VQA scores for all bboxes in a single batch call
         # We use the category name of the first detection as the prompt for the whole batch,
@@ -1096,7 +964,7 @@ def build_few_shot_dict(dataset_path, examples_per_class=2, coco_override=None):
                 viz_dir, f"few_shot_{cat_name}_{os.path.basename(img_info['file_name'])}"
             )
 
-            visualize_bboxes(
+            utils.visualize_bboxes(
                 image_path=image_path,
                 pred_bboxes=[],  # no predictions, only GT
                 gt_bboxes=gt_bboxes,
@@ -1714,7 +1582,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             
             print(f"file_{os.path.basename(img_info['file_name'])} img.size: {img.size}")
 
-            img_with_boxes = draw_colored_bboxes_on_image(img, "green", gt_bboxes)
+            img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", gt_bboxes)
 
             img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_imId_{chosen_img_id}_file_{os.path.basename(img_info['file_name'])}.png")
             
@@ -1818,7 +1686,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
             other_img = Image.open(other_image_path).convert("RGB")
             
-            other_img_with_boxes = draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
+            other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
 
             other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
             #Save image
@@ -2167,7 +2035,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 img = Image.open(ex['image_path']).convert("RGB")
                 if ex_type == 'best_match':
                     # if not ex['gt_bbox']: continue
-                    img_with_boxes = draw_colored_bboxes_on_image(img, "green", [ex['gt_bbox']])
+                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", [ex['gt_bbox']])
                     caption = f"Best Match (score: {ex['best_score']:.2f})"
                 
                 elif ex_type == 'worst_fp':
@@ -2175,12 +2043,12 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                     #TODO-GRG: We need to ensure that there aren't any pred boxes that match GT boxes here
                     #TODO-GRG: We also need to ensure that there aren't any pred boxes that are actually right but shown wrong as the gt label is not there due to few-shot
 
-                    img_with_boxes = draw_colored_bboxes_on_image(img, "red", [ex['pred_bbox']])
+                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "red", [ex['pred_bbox']])
                     caption = f"Worst FP (Error: {ex['fp_error']:.2f})"
                 
                 elif ex_type == 'worst_fn':
                     # if not ex['gt_bbox']: continue
-                    img_with_boxes = draw_colored_bboxes_on_image(img, "blue", [ex['gt_bbox']])
+                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "blue", [ex['gt_bbox']])
                     caption = f"Worst FN (Error: {ex['fn_error']:.2f})"
                 
                 else:
@@ -2347,7 +2215,7 @@ def run_single_dataset_evaluation(args):
 
     print(f"Using model: {args.model_name}")
 
-    model, processor = load_qwen_model(args.model_name)
+    model, processor = utils.load_qwen_model(args.model_name)
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
