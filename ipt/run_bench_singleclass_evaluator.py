@@ -1254,7 +1254,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 total_count += 1
 
                 # --- Incremental Save ---
-                if total_count % 10 == 0:
+                if total_count % 5 == 0:
                     print(f"\nSaving intermediate results at image {total_count + 1}/{len(images_to_process)}...")
                     for eval_type, detections in detections_all_by_type.items():
                         with open(prediction_cache_paths[eval_type], "w", encoding="utf-8") as f:
