@@ -54,288 +54,6 @@ def set_seed_from_state(seed_state):
 
 
 
-
-
-def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, prompt_list, pil_images: list, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    if not pil_images: return np.array([])
-    
-    def getDatasetInstructions(dataset_instructions_json, class_name):
-        if class_name in dataset_instructions_json:       
-            dataset_instructions = dataset_instructions_json[class_name]
-        else:
-
-            # Find the matching key ignoring case
-            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
-            if matched_key:
-                dataset_instructions = dataset_instructions_json[matched_key]
-            else:
-                #Throw error
-                raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
-        
-        return dataset_instructions
-
-
-
-    def getPrompt(prompt, dataset_instructions_json):
-
-        question = f"""
-            Given the '{prompt}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, prompt)}
-
-            Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
-        """
-
-        return question
-
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
-        
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
-        
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
-        
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
-    
-    return np.array(all_final_scores)
-
-
-
-def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    if not pil_images: return np.array([])
-    
-    def getPrompt(prompt):
-        # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        return question
-
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
-        
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
-        
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
-        
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
-    
-    return np.array(all_final_scores)
-
-
-import string
-def getClsIndex(predicted_tokens, num_cls):
-
-    #Check for col - which is a character - but we muct also include cases like '[A' which is a single token
-    cls_char = [f"{cls}" for cls in range(num_cls)]
-
-    cls_index = np.ones(len(predicted_tokens))
-    
-    default_cls_idx = 1
-    
-    #Direct Match
-    dir_cls_match = np.array([t in cls_char for t in predicted_tokens])
-    
-    found_cls = False
-
-    if np.any(dir_cls_match):
-        found_cls = True
-        cls_index = dir_cls_match
-
-
-    #Find any char or digit containing token
-    if not found_cls:
-        cls_index[np.where(np.array(predicted_tokens) == '<|im_end|>')] = 0
-
-        # digit_index = [np.any([c.isdigit() and c not in string.punctuation for c in s]) for s in predicted_tokens]
-        alpha_index = [np.any([c.isalpha() and c not in string.punctuation for c in s]) for s in predicted_tokens]
-
-        # cls_index = np.logical_and(cls_index, digit_index)
-        cls_index = np.logical_and(cls_index, alpha_index)
-
-        if np.any(cls_index):
-            found_cls = True
-
-
-    #Handling default fallback
-    if not found_cls:
-        cls_index = np.ones(len(predicted_tokens))
-        cls_index[default_cls_idx] = 1
-
-
-    return cls_index
-
-
-def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, class_name_list: list, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    if not pil_images: return np.array([])
-    
-
-    num_cls = len(class_name_list)
-
-    def getPrompt(prompt):
-        class_options = [f"${chr(ord('A') + i)}$: {c}" for i, c in enumerate(class_name_list)]
-        class_options_str = ", ".join(class_options)
-        # example_class_token = f"[{chr(ord('A'))}]"
-        example_class_token = f"${chr(ord('A'))}$"
-        
-        question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {class_options_str}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: {example_class_token}."
-        return question
-
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
-        
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
- 
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            # outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-            outputs = qwen_model.generate(**inputs, max_new_tokens=5, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
-        for b in range(len(batch_pil_images)):
-            predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i][b], dim=-1)) for i in range(len(outputs.scores))]
-            print(f"[{b}] Predicted tokens: {predicted_tokens}")
-    
-            cls_index = getClsIndex(predicted_tokens, num_cls)
-            print(f"[{b}] Found cls_index: {cls_index}")
-            
-            # We take the mean for all found tokens 
-            cls_scores = torch.concat([outputs.scores[i][b].unsqueeze(0) for i in range(len(outputs.scores)) if cls_index[i] == 1], dim = 0).mean(dim = 0).unsqueeze(0)
-        
-            # Get token IDs for 'A', 'B', 'C', etc.
-            cls_token_ids = [qwen_processor.tokenizer.encode(f"{chr(ord('A') + i)}")[0] for i in range(num_cls)]
-            print("[{b}] Cls-Tokens:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_ids)]))
-        
-            # Print the next predicted token 
-            predicted_cls_token = qwen_processor.tokenizer.decode(torch.argmax(cls_scores, dim=-1))
-            print("[{b}] Cls predicted token:", predicted_cls_token)
-            
-            cls_probs = torch.nn.functional.softmax(cls_scores, dim=-1)
-            
-            if len(cls_token_ids) != len(set(cls_token_ids)):
-                print(f"\n\n******\n[{b}] Error! Cls Token ids aren't unique: {np.unique(cls_token_ids, return_counts = True)}\n******\n\n")
-
-            cls_token_probs = [cls_probs[:, cls] for cls in cls_token_ids]
-            print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
-
-            #Normalize the col & row token probs - to avoid row/col domination
-        
-            cls_token_probs = torch.tensor(cls_token_probs)
-            cls_token_probs = cls_token_probs/cls_token_probs.sum()
-            print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
-
-            all_final_scores.append({'cls_name': class_name_list[cls_token_probs.argmax()], 'cls_prob':cls_token_probs.max()})
-        
-        
-    return all_final_scores
-
-
-def calculate_iou(boxA_xywh, boxB_xywh):
-    """
-    Calculates the Intersection over Union (IoU) of two bounding boxes.
-    Boxes are expected in [x, y, w, h] format.
-    """
-    # Convert from [x, y, w, h] to [x1, y1, x2, y2]
-    boxA = [boxA_xywh[0], boxA_xywh[1], boxA_xywh[0] + boxA_xywh[2], boxA_xywh[1] + boxA_xywh[3]]
-    boxB = [boxB_xywh[0], boxB_xywh[1], boxB_xywh[0] + boxB_xywh[2], boxB_xywh[1] + boxB_xywh[3]]
-
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interArea = max(0, xB - xA) * max(0, yB - yA)
-    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-    boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
-    
-    unionArea = float(boxAArea + boxBArea - interArea)
-    if unionArea == 0:
-        return 0.0
-        
-    return interArea / unionArea
-
-def apply_nms(detections, iou_threshold=0.5):
-    """
-    Applies Non-Maximum Suppression to a list of detections.
-    Each detection is a dict with 'bbox' ([x,y,w,h]) and 'score'.
-    """
-    if not detections:
-        return []
-
-    # Sort detections by score in descending order
-    detections = sorted(detections, key=lambda x: x['score'], reverse=True)
-
-    kept_detections = []
-    while detections:
-        # Keep the detection with the highest score
-        best_det = detections.pop(0)
-        kept_detections.append(best_det)
-
-        # Remove detections that have a high IoU with the best one
-        remaining_detections = []
-        for det in detections:
-            if calculate_iou(best_det['bbox'], det['bbox']) < iou_threshold:
-                remaining_detections.append(det)
-        detections = remaining_detections
-
-    return kept_detections
-
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
                                     no_instructions=False, few_shot_dict=None, output_dir=".", 
                                     eval_class_name=None):
@@ -442,18 +160,18 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # vqa_prompt = parsed_bboxes[0]["category_name"]
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
-        # vqa_scores = get_masked_image_vqa_scores(
+        # vqa_scores = utils.get_masked_image_vqa_scores(
         #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
         # )
         if args.class_rescore:
-            vqa_dict = get_masked_image_vqa_class_scores(
+            vqa_dict = utils.get_masked_image_vqa_class_scores(
                 model, processor, vqa_prompts, vqa_images, class_name_list, batch_size=args.vqa_batch_size
             )
         else:
-            # vqa_scores = get_masked_image_vqa_scores(
+            # vqa_scores = utils.get_masked_image_vqa_scores(
             #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
-            vqa_scores = get_masked_image_vqa_scores_with_instructions(
+            vqa_scores = utils.get_masked_image_vqa_scores_with_instructions(
                 model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             )
         
@@ -481,8 +199,8 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     # --- End of VQA-based Re-scoring ---
 
     # --- Non-Maximum Suppression ---
-    detections_orig_with_nms = apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
-    detections_vqa_with_nms = apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
+    detections_orig_with_nms = utils.apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
+    detections_vqa_with_nms = utils.apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
     # --- End of NMS ---
 
     return raw_output, all_few_shot_examples, {
