@@ -6,26 +6,26 @@ Run cmd: CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python code/rf100vl/qwen-2.5-vl-rf
 import os
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import json
-import glob
 import torch
-import shutil
 from PIL import Image
 from tqdm import tqdm
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 from qwen_vl_utils import process_vision_info
+
 import time
 import gc
-from PIL import ImageDraw, ImageFilter, ImageFont
+from PIL import ImageDraw, ImageFont
 import numpy as np
 import argparse
 import re
 import random
-import pandas as pd
-import subprocess
+
+import run_bench_singleclass_VQAscoring_webUI_multimetrics as evaluator
+
 
 def set_seed(seed):
     """Sets the seed for reproducibility."""
@@ -53,22 +53,31 @@ def set_seed_from_state(seed_state):
         torch.cuda.set_rng_state_all(seed_state['torch_cuda_random_state'])
 
 
-def _load_qwen_model_raw(qwen_device="cuda:0", device_map_auto=False):
-    """Loads the Qwen model and processor."""
-    device_map_config = "auto" if device_map_auto else {"": qwen_device}
-    print(f"Loading Qwen model with device_map: {device_map_config}")
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2.5-VL-7B-Instruct",
-        # torch_dtype="auto",
+def load_qwen_model(model_name):
+    
+   
+    model = None
+    if(model_name.startswith("Qwen2.5-VL")):
+         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        "Qwen/"+model_name,
         torch_dtype= torch.bfloat16,
         attn_implementation="flash_attention_2",
-        # device_map="auto"
-        # device_map={"": qwen_device}
-        device_map=device_map_config
+        device_map="auto"
     )
-    processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct")
-    model.eval()
+    elif(model_name.startswith("Qwen3-VL-235B")):
+        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+            "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+        ) 
+    elif(model_name.startswith("Qwen3-VL")):
+        model = Qwen3VLForConditionalGeneration.from_pretrained(
+            "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+        )
+    else:
+        print("Error: Invalid model name")
+        return None, None
 
+    processor = AutoProcessor.from_pretrained("Qwen/"+model_name)
+    model.eval()
 
     print("processor.tokenizer.padding_side:", processor.tokenizer.padding_side)
     print("processor.tokenizer.pad_token:", processor.tokenizer.pad_token)
@@ -100,9 +109,7 @@ def _load_qwen_model_raw(qwen_device="cuda:0", device_map_auto=False):
 
     return model, processor
 
-def load_qwen_model(qwen_device="cuda:0", device_map_auto=False): # For CLI
-    """Loads the Qwen model and processor for CLI use."""
-    return _load_qwen_model_raw(qwen_device, device_map_auto)
+
 
 def draw_bboxes_on_image(image, pred_bboxes, gt_bboxes):
     """
@@ -1632,22 +1639,13 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
     
     # Initial setup
-    # readme_path = os.path.join(dataset_path, "README.roboflow.txt")
-    # readme_path = os.path.join(dataset_path, "README.dataset.txt")
-    # initial_instructions = ""
-    # if os.path.isfile(readme_path):
-    #     with open(readme_path, "r", encoding="utf-8") as f:
-    #         initial_instructions = f.read()
 
-    # readme_json_path = os.path.join(dataset_path, "README.dataset_class_def.json")
     readme_json_path = os.path.join("./data_instr/default", f"README.dataset_{os.path.basename(dataset_path)}.json")
     class_instructions_json = {}
     if os.path.isfile(readme_json_path):
         with open(readme_json_path, "r", encoding="utf-8") as f:
             class_instructions_json = json.load(f)
 
-    # few_shot_dict = build_few_shot_dict(dataset_path, examples_per_class=5)
-    
 
     #Get all category ids
     train_dir = os.path.join(dataset_path, "train")
@@ -1816,7 +1814,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         if len(gt_examples_for_class) != 10:
             print(f"Warning! GT examples count does not match expected number - 10!")
         
-        
+
         # Generate the definition
         initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
         
@@ -2388,65 +2386,43 @@ def run_single_dataset_evaluation(args):
         print(f"Error: Invalid or missing --dataset_path: {args.dataset_path}")
         return
 
-    run_modes = []
-    if args.no_instructions:
-        run_modes.append("noinstr")
-    if args.few_shot:
-        run_modes.append("fewshot")
-    if args.vqa_rescore:
-        run_modes.append("vqa")
-    if args.class_rescore:
-        run_modes.append("cls_rescore")
-    # Add NMS threshold to run name to differentiate runs
-    run_modes.append(f"nms{args.nms_threshold}")
-    run_name = "_".join(run_modes) if run_modes else "default"
-
     # Set seed for reproducibility
     set_seed(args.seed)
 
     # os.makedirs(args.output_dir, exist_ok=True)
 
 
-    model, processor = load_qwen_model(device_map_auto=args.device_map_auto)
-    model.eval()
+    print(f"Using model: {args.model_name}")
+
+    model, processor = load_qwen_model(args.model_name)
 
     print("=" * 60)
     print(f"Evaluating dataset: {args.dataset_path}")
 
-    if args.ipt_mode:
-        # Run the iterative prompt refinement process
-        dataset_instructions_override_json = iterative_prompt_refinement(
-            args,
-            model=model,
-            processor=processor,
-            dataset_path=args.dataset_path,
-            num_iterations=args.num_ipt_iterations
-        )
+    
+    # Run the iterative prompt refinement process
+    dataset_instructions_override_json = iterative_prompt_refinement(
+        args,
+        model=model,
+        processor=processor,
+        dataset_path=args.dataset_path,
+        num_iterations=args.num_ipt_iterations
+    )
 
-    # ds_stats = list(evaluate_dataset(args, model, processor, args.dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir))
-    eval_generator = evaluate_dataset(args, model, processor, args.dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir,
-            dataset_instructions_override_json=dataset_instructions_override_json if args.ipt_mode else None)
-    try:
-        while True:
-            next(eval_generator)
-    except StopIteration as e:
-        ds_stats = e.value
-
-    if ds_stats and "vqa_with_nms" in ds_stats:
-        # print(f"mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats[-1][0]:.4f}")
-        print(f"mAP (AP50-95) for {os.path.basename(args.dataset_path)}: {ds_stats['vqa_with_nms'][0]:.4f}")
-    else:
-        print(f"Evaluation failed for {args.dataset_path}")
-
+    print(f"Starting the final evaluation with the new refined class definitions...")
+    args.data_instr_path = os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions")
+    args.output_dir = os.path.join(args.output_dir, f"final_instruction_eval")
+    evaluator.run_single_dataset_evaluation(args)
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name')
     parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
     parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
-    parser.add_argument("--output_dir", type=str, default="results/rf100vl_IPT/rf20_IPT_singleclass_codePrompt_vqaScoreFixed_classRescoreFix_withNMS_v1_instr", help="Directory to save results and visuals.")
+    parser.add_argument("--output_dir", type=str, default="results/rf100vl_IPT/rf20_IPT_singleclass_vqaScore_withNMS", help="Directory to save results and visuals.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
