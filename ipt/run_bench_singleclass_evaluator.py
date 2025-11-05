@@ -1167,11 +1167,9 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 ann_ids = coco_gt.getAnnIds(imgIds=[img_id])
                 anns = coco_gt.loadAnns(ann_ids)
                 
-                cat_ids_for_image = set(ann["category_id"] for ann in anns)
-                print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]["name"] for cat_id in cat_ids_for_image]}")
-                # cat_names = [coco_gt.cats[cat_id]["name"] for cat_id in cat_ids_for_image]
-                # print(f"Image {img_filename} has categories: {cat_names}")
-
+                # cat_ids_for_image = set(ann["category_id"] for ann in anns)
+                # print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]["name"] for cat_id in cat_ids_for_image]}")
+                
                 
                 raw_output, few_shot_examples_used, all_detections = run_inference_on_single_image( #grg_changed
                     args,
