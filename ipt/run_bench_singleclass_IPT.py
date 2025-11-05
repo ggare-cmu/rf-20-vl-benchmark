@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
+from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoModelForVision2Seq, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 from qwen_vl_utils import process_vision_info
 
 import time
@@ -57,6 +57,8 @@ def load_qwen_model(model_name):
     
    
     model = None
+
+   
     if(model_name.startswith("Qwen2.5-VL")): 
         print("Loading using Qwen2_5_VLForConditionalGeneration")
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -65,17 +67,25 @@ def load_qwen_model(model_name):
         attn_implementation="flash_attention_2",
         device_map="auto"
     )
-    elif(model_name.startswith("Qwen3-VL-235B")):
-        print("Loading using Qwen3VLMoeForConditionalGeneration")
-        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-            "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
-        ) 
+    # elif(model_name.startswith("Qwen3-VL-235B")):
+    #     print("Loading using Qwen3VLMoeForConditionalGeneration")
+    #     model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+    #         # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+    #         "Qwen/"+model_name, dtype=torch.bfloat8, attn_implementation="flash_attention_2", device_map="auto"
+    #     ) 
     elif(model_name.startswith("Qwen3-VL")):
         print("Loading using Qwen3VLForConditionalGeneration")
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-        )
+        # model = Qwen3VLForConditionalGeneration.from_pretrained(
+        #     "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+        # )
+
+        model = AutoModelForVision2Seq.from_pretrained(
+                        f"Qwen/{model_name}",
+                        trust_remote_code=True,
+                        torch_dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
+                        attn_implementation="flash_attention_2",
+                        device_map="auto"
+                    )
     else:
         print("Error: Invalid model name")
         return None, None
