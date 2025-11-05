@@ -4,3 +4,4 @@ datasets/*
 results/*
 ipt/__pycache__/*
 
+datasets
