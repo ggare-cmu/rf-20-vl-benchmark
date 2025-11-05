@@ -16,7 +16,7 @@ MODEL_NAME="Qwen3-VL-30B-A3B-Instruct"
 
 # CUDA_VISIBLE_DEVICES=0 python ipt/run_bench_singleclass_VQAscoring_webUI_IPT_fs.py --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT_tmp/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1
 RESULTSDIR="results/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/rf20_IPT_singleclass_vqaScore_withNMS"
-CMD_TEMPLATE="source ~/.bashrc && conda activate rf100vl-env && python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
+CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate rf100vl-env && python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
 
 # CMD_TEMPLATE="rb; python ipt/run_bench_singleclass_IPT.py --model_name Qwen2.5-VL-7B-Instruct --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
