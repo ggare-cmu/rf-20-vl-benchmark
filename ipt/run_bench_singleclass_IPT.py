@@ -778,6 +778,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         instruction_refinements = {}    
         for i in range(num_iterations):
             
+            print(f"\n\n\n--- Iteration {i} for class '{class_name}' ---\n\n\n")
 
             # stats_type = "vqa_with_nms"
             stats_type = "vqa_no_nms"
