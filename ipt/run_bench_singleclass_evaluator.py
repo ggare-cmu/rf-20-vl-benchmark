@@ -32,173 +32,8 @@ import random
 import ipt_utils as utils
 
 
-def set_seed(seed):
-    """Sets the seed for reproducibility."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
-
-
-
-
-
-def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
-                                #   no_instructions=False, few_shot_examples=None, output_dir="."):
-                                    no_instructions=False, few_shot_dict=None, output_dir="."):
-    """
-    Runs Qwen inference on a single image and parses the output.
-    """
-    set_seed(args.seed)
-
-    raw_output = ""
-    parsed_bboxes = []
-    all_few_shot_examples = []
-
-    for class_name in class_name_list: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
-        
-        if class_name in dataset_instructions_json:       
-            dataset_instructions = dataset_instructions_json[class_name]
-        else:
-    
-            # Find the matching key ignoring case
-            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
-            if matched_key:
-                dataset_instructions = dataset_instructions_json[matched_key]
-            else:
-                #Throw error
-                raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
-        
-        # cat_name_str = ds_cat_names[0] if len(ds_cat_names) > 0 else "unknown"
-
-        if few_shot_dict:
-            num_few_shot = 3
-            # num_few_shot = min(3, len(few_shot_samples)) 
-            few_shot_examples_for_cat = few_shot_dict.get(class_name, [])
-            # few_shot_samples_i = random.sample(few_shot_samples, num_few_shot) if few_shot_examples else None
-            few_shot_examples_for_cat_i = random.sample(few_shot_examples_for_cat, num_few_shot)
-        else:
-            # few_shot_samples_i = None
-            few_shot_examples_for_cat_i = None
-        all_few_shot_examples.extend(few_shot_examples_for_cat_i or [])
-        
-
-        set_seed(args.seed)
-        
-        # raw_output_i = run_qwen_inference(
-        raw_output_i, input_width, input_height = run_qwen_inference(
-            args,
-            model, processor,
-            image_path=image_path,
-            dataset_instructions=dataset_instructions,
-            class_name=class_name,
-            # class_name_list=class_name_list,
-            no_instructions=no_instructions,
-            # few_shot_examples=
-            few_shot_examples=few_shot_examples_for_cat_i
-        )
-
-        parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
-
-        #For Qwen3-VL, Qwen3-VL's default coordinate system has been changed from the absolute coordinates used in Qwen2.5-VL to relative coordinates ranging from 0 to 1000. (You don't need to calculate the resized_w)
-        # Ref: https://github.com/QwenLM/Qwen3-VL/blob/main/cookbooks/2d_grounding.ipynb 
-        if not args.model_name.startswith("Qwen2.5-VL"):
-            input_height = 1000
-            input_width = 1000
-            assert args.model_name.startswith("Qwen3-VL")
-
-        # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
-        image = Image.open(image_path).convert("RGB")
-        width, height = image.size
-        for det in parsed_bboxes_i:
-            bbox = det["bbox"]
-            x, y, bw, bh = bbox
-            x1, y1, x2, y2 = x, y, x + bw, y + bh
-            
-            # Convert normalized coordinates to absolute coordinates
-            abs_y1 = int(y1/input_height * height)
-            abs_x1 = int(x1/input_width * width)
-            abs_y2 = int(y2/input_height * height)
-            abs_x2 = int(x2/input_width * width)    
-
-            abs_w = abs_x2 - abs_x1
-            abs_h = abs_y2 - abs_y1
-
-            det["bbox"] = [abs_x1, abs_y1, abs_w, abs_h]
-
-        # Accumulate results for all classes
-        parsed_bboxes.extend(parsed_bboxes_i)
-        raw_output += f"\n\n--- For class '{class_name}' ---\n{raw_output_i}"
-           
-    # --- VQA-based Re-scoring ---
-    # Create copies for different evaluation paths
-    detections_orig_no_nms = [det.copy() for det in parsed_bboxes]
-    detections_vqa_no_nms = []
-
-    if args.vqa_rescore and parsed_bboxes:
-        original_image = Image.open(image_path).convert("RGB")
-        
-        # Create a list of images, each with one bounding box drawn
-        vqa_images = [utils.create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
-        
-        # Get VQA scores for all bboxes in a single batch call
-        # We use the category name of the first detection as the prompt for the whole batch,
-        # assuming all detections in this context are for the same class.
-        # vqa_prompt = parsed_bboxes[0]["category_name"]
-        vqa_prompts = [det["category_name"] for det in parsed_bboxes]
-       
-        # vqa_scores = utils.get_masked_image_vqa_scores(
-        #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
-        # )
-        if args.class_rescore:
-            vqa_dict = utils.get_masked_image_vqa_class_scores(
-                model, processor, vqa_prompts, vqa_images, class_name_list, batch_size=args.vqa_batch_size
-            )
-        else:
-            # vqa_scores = utils.get_masked_image_vqa_scores(
-            #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            # )
-            vqa_scores = utils.get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            )
-        
-        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
-
-        # Replace original scores with VQA scores
-        # for i, det in enumerate(parsed_bboxes):
-        for i, det in enumerate(detections_vqa_no_nms):
-            det["model_score"] = det["score"]  # Keep original model score for reference
-
-            if args.class_rescore:
-                det["model_category_name"] = det["category_name"]  # Keep original model category name
-                det["vqa_category_name"] = vqa_dict[i]['cls_name']
-                det["category_name"] = vqa_dict[i]['cls_name']
-
-                det["vqa_score"] = vqa_dict[i]['cls_prob'].item()
-                det["score"] = vqa_dict[i]['cls_prob'].item()
-            else:
-                det["vqa_score"] = vqa_scores[i]
-                det["score"] = vqa_scores[i]
-    else:
-        # If not VQA-rescoring, the VQA-based lists are the same as original
-        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
-    
-    # --- End of VQA-based Re-scoring ---
-
-    # --- Non-Maximum Suppression ---
-    detections_orig_with_nms = utils.apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
-    detections_vqa_with_nms = utils.apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
-    # --- End of NMS ---
-
-    return raw_output, all_few_shot_examples, {
-        "orig_no_nms": detections_orig_no_nms,
-        "orig_with_nms": detections_orig_with_nms,
-        "vqa_no_nms": detections_vqa_no_nms,
-        "vqa_with_nms": detections_vqa_with_nms,
-    }
 
 
 
@@ -208,7 +43,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
     Given a model, processor, local image path, instructions (from README), 
     and the current image's filename, run Qwen2.5-VL and return the raw text output.
     """
-    set_seed(args.seed)
+    utils.set_seed(args.seed)
 
     #image = Image.open(image_path).convert("RGB")
 
@@ -945,7 +780,7 @@ def run_single_dataset_evaluation(args):
     run_name = "_".join(run_modes) if run_modes else "default"
 
     # Set seed for reproducibility
-    set_seed(args.seed)
+    utils.set_seed(args.seed)
 
     # os.makedirs(args.output_dir, exist_ok=True)
 
