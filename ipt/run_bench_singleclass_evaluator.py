@@ -147,7 +147,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]['name'] for cat_id in cat_ids_for_image]}")
                 
                 
-                raw_output, few_shot_examples_used, all_detections = run_inference_on_single_image( #grg_changed
+                raw_output, few_shot_examples_used, all_detections = utils.run_inference_on_single_image( #grg_changed
                     args,
                     model, processor,
                     image_path=image_path,
