@@ -440,7 +440,8 @@ def apply_nms(detections, iou_threshold=0.5):
 
 
 
-def run_qwen_inference(args, model, processor, image_path, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None):
+# def run_qwen_inference(args, model, processor, image_path, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None):
+def run_qwen_inference(args, model, processor, image, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None):
     """
     Given a model, processor, local image path, instructions (from README), 
     and the current image's filename, run Qwen2.5-VL and return the raw text output.
@@ -613,7 +614,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
                     {"type": "image", "image": few_shot_examples[2]["viz_path"]},
                     # {"type": "text", "text": f"Now analyze the following query image by following the pseudo code above:"},
                     {"type": "text", "text": f"Now analyze the following query image by following the pseudo code above to detect {class_name}s in:"},
-                    {"type": "image", "image": image_path},
+                    {"type": "image", "image": image},
                 ],
             }
         ]
@@ -623,7 +624,7 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt_text},
-                    {"type": "image", "image": image_path},
+                    {"type": "image", "image": image},
                 ],
             }
         ]
@@ -917,6 +918,9 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     """
     set_seed(args.seed)
 
+    original_image = Image.open(image_path).convert("RGB")
+
+
     raw_output = ""
     parsed_bboxes = []
     all_few_shot_examples = []
@@ -955,7 +959,8 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         raw_output_i, input_width, input_height = run_qwen_inference(
             args,
             model, processor,
-            image_path=image_path,
+            # image_path=image_path,
+            image=original_image,
             dataset_instructions=dataset_instructions,
             class_name=class_name,
             # class_name_list=class_name_list,
@@ -1002,7 +1007,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     detections_vqa_no_nms = []
 
     if args.vqa_rescore and parsed_bboxes:
-        original_image = Image.open(image_path).convert("RGB")
+        # original_image = Image.open(image_path).convert("RGB")
         
         # Create a list of images, each with one bounding box drawn
         vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]

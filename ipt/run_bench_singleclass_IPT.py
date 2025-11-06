@@ -288,7 +288,8 @@ def generate_initial_class_definition(args, model, processor, class_name, initia
     # Concatenate images into a single message to avoid overwhelming the model
     # with too many separate image prompts if the list is very long.
     for example in few_shot_examples:
-        content.append({"type": "image", "image": example["image_path"]})
+        # content.append({"type": "image", "image": example["image_path"]})
+        content.append({"type": "image", "image": example})
 
     messages = [{"role": "user", "content": content}]
    
@@ -382,9 +383,11 @@ def generate_class_definition_withFP(args, model, processor, class_name, current
 
         },
         # {"type": "text", "text": f"Here is the 'correct_image' showing the '{class_name}' class in green bounding boxes:"},
-        {"type": "image", "image": correct_image["image_path"]},
+        # {"type": "image", "image": correct_image["image_path"]},
+        {"type": "image", "image": correct_image},
         # {"type": "text", "text": f"Here is the 'FP_error_image' showing the false positive for the '{class_name}' class in red bounding boxes:"},
-        {"type": "image", "image": FP_error_image["image_path"]}
+        # {"type": "image", "image": FP_error_image["image_path"]}
+        {"type": "image", "image": FP_error_image}
     ]
 
     messages = [{"role": "user", "content": content}]
@@ -427,9 +430,11 @@ def generate_class_definition_withFN(args, model, processor, class_name, current
 
         },
         # {"type": "text", "text": f"Here is the 'correct_image' showing the '{class_name}' class in green bounding boxes:"},
-        {"type": "image", "image": correct_image["image_path"]},
+        # {"type": "image", "image": correct_image["image_path"]},
+        {"type": "image", "image": correct_image},
         # {"type": "text", "text": f"Here is the 'FP_error_image' showing the false positive for the '{class_name}' class in red bounding boxes:"},
-        {"type": "image", "image": FN_error_image["image_path"]}
+        # {"type": "image", "image": FN_error_image["image_path"]}
+        {"type": "image", "image": FN_error_image}
     ]
 
     messages = [{"role": "user", "content": content}]
@@ -627,7 +632,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             #Save image
             img_with_boxes.save(img_viz_path)
 
-            gt_examples_for_class.append({"image_path": img_viz_path})
+            # gt_examples_for_class.append({"image_path": img_viz_path})
+            gt_examples_for_class.append(img_with_boxes)
 
 
 
@@ -725,7 +731,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             #Save image
             other_img_with_boxes.save(other_img_viz_path)
 
-            fp_examples_for_class = {"image_path": other_img_viz_path}
+            # fp_examples_for_class = {"image_path": other_img_viz_path}
+            fp_examples_for_class = other_img_with_boxes
 
             # positive_examples_for_class = random.choice(examples_to_use)
             if len(examples_to_use) > idx:
@@ -1099,7 +1106,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 #Save image
                 img_with_boxes.save(img_viz_path)
 
-                few_shot_examples[ex_type] = {"image_path": img_viz_path}
+                # few_shot_examples[ex_type] = {"image_path": img_viz_path}
+                few_shot_examples[ex_type] = img_with_boxes
 
 
 
