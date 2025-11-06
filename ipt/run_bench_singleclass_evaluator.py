@@ -25,9 +25,6 @@ import ipt_utils as utils
 
 
 
-
-
-
 def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, run_name="", output_dir="results", max_samples=None):
     test_dir = os.path.join(dataset_path, "test")
     ann_path = os.path.join(test_dir, "_annotations.coco.json")
@@ -235,6 +232,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
     print(f"Saved evaluation results to {eval_results_path}")
 
     return all_stats
+
+
 
 
 def run_single_dataset_evaluation(args):
