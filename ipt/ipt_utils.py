@@ -9,6 +9,10 @@ from tqdm import tqdm
 import gc
 import argparse
 
+from vllm import LLM, SamplingParams
+from transformers import AutoProcessor
+from PIL import Image
+
 
 import torch
 
@@ -283,9 +287,9 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=2
 
 #     return outputs
 
-from vllm import LLM, SamplingParams
-from transformers import AutoProcessor
-from PIL import Image
+# from vllm import LLM, SamplingParams
+# from transformers import AutoProcessor
+# from PIL import Image
 
 
 def load_qwen_model_vllm_multimodal(model_name: str):
