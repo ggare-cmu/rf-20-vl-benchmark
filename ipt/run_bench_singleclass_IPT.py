@@ -12,8 +12,6 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from qwen_vl_utils import process_vision_info
-
 import time
 import gc
 
@@ -293,23 +291,15 @@ def generate_initial_class_definition(args, model, processor, class_name, initia
         content.append({"type": "image", "image": example["image_path"]})
 
     messages = [{"role": "user", "content": content}]
-    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+   
+    definition, _ = utils.model_generate(messages, model, processor)
 
-    with torch.no_grad():
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
-    
-    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
-    definition = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
     # Clean up the definition
     definition = definition.replace(f"The visual characteristics of the '{class_name}' class are:", "").strip()
     definition = definition.replace(f"Definition of '{class_name}':", "").strip()
     
     print(f"Generated initial definition for '{class_name}': {definition}")
     return definition
-
 
 
 def generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples):
@@ -349,18 +339,10 @@ def generate_class_definition(args, model, processor, class_name, current_instru
         content.append({"type": "image", "image": example["image_path"]})
 
     messages = [{"role": "user", "content": content}]
-    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
-
-    with torch.no_grad():
-        # generated_ids = model.generate(**inputs, max_new_tokens=256)
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
     
-    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
-    definition = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
+    definition, _ = utils.model_generate(messages, model, processor)
     print(f"Generated definition for '{class_name}': {definition}")
+    
     return definition
 
 
@@ -406,18 +388,10 @@ def generate_class_definition_withFP(args, model, processor, class_name, current
     ]
 
     messages = [{"role": "user", "content": content}]
-    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
-
-    with torch.no_grad():
-        # generated_ids = model.generate(**inputs, max_new_tokens=256)
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
     
-    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
-    definition = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
+    definition, _ = utils.model_generate(messages, model, processor) 
     print(f"Generated definition for '{class_name}': {definition}")
+
     return definition
 
 
@@ -459,18 +433,10 @@ def generate_class_definition_withFN(args, model, processor, class_name, current
     ]
 
     messages = [{"role": "user", "content": content}]
-    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
-
-    with torch.no_grad():
-        # generated_ids = model.generate(**inputs, max_new_tokens=256)
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
     
-    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
-    definition = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
+    definition, _ = utils.model_generate(messages, model, processor)
     print(f"Generated definition for '{class_name}': {definition}")
+
     return definition
 
 

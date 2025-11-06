@@ -125,6 +125,42 @@ def load_qwen_model(model_name):
     return model, processor
 
 
+# Model inference utils
+
+
+
+def model_generate(messages, model, processor):
+    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, _ = process_vision_info(messages)
+    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+
+    with torch.no_grad():
+        # generated_ids = model.generate(**inputs, max_new_tokens=256)
+        generated_ids = model.generate(**inputs, max_new_tokens=2048)
+    
+    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
+    output_text = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+    
+    return output_text, inputs
+
+
+
+def model_generate_with_scores(conversations, model, processor, max_new_tokens=2):
+    # conversations is a list of message lists
+
+    # Prepare inputs for the model
+    text = processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
+    image_inputs, _ = process_vision_info(conversations)
+    inputs = processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    
+    # Generate outputs
+    with torch.inference_mode():
+        outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, output_scores=True, return_dict_in_generate=True)
+    
+    
+    return outputs
+
+
 
 # VQA utils
 
@@ -173,15 +209,9 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         # Create conversations for the batch
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+
         # Calculate 'Yes' probability
         scores = outputs.scores[0]
         probs = torch.nn.functional.softmax(scores, dim=-1)
@@ -218,15 +248,9 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         # Create conversations for the batch
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+
         # Calculate 'Yes' probability
         scores = outputs.scores[0]
         probs = torch.nn.functional.softmax(scores, dim=-1)
@@ -320,16 +344,11 @@ def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, p
         # Create conversations for the batch
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
  
-        # Prepare inputs for the model
-        text = qwen_processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
-        image_inputs, _ = process_vision_info(conversations)
-        inputs = qwen_processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(qwen_model.device)
-        
-        # Generate outputs
-        with torch.inference_mode():
-            # outputs = qwen_model.generate(**inputs, max_new_tokens=2, do_sample=False, output_scores=True, return_dict_in_generate=True)
-            outputs = qwen_model.generate(**inputs, max_new_tokens=5, do_sample=False, output_scores=True, return_dict_in_generate=True)
-        
+
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor, max_new_tokens=5)
+
+                
         for b in range(len(batch_pil_images)):
             predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i][b], dim=-1)) for i in range(len(outputs.scores))]
             print(f"[{b}] Predicted tokens: {predicted_tokens}")
@@ -610,39 +629,8 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
         ]
        
 
+    output_text, inputs = model_generate(messages, model, processor)
 
-    text_input = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    image_inputs, video_inputs = process_vision_info(messages)
-    inputs = processor(
-        text=[text_input],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
-    )
-    inputs = inputs.to(model.device)
-
-    # inputs['pixel_values'].shape
-    # torch.Size([64680, 1176])
-    
-    # inputs['pixel_values'].shape
-    # torch.Size([1380, 1176])
-
-    with torch.no_grad():
-        # generated_ids = model.generate(**inputs, max_new_tokens=512)
-        # generated_ids = model.generate(**inputs, max_new_tokens=1024)
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
-
-
-        
-    generated_ids_trimmed = [
-        out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)
-    ]
-    output_text = processor.batch_decode(
-        generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-    )[0]
 
     #Sample
     # ```json
