@@ -1,8 +1,19 @@
 
+
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+from tqdm import tqdm
+import gc
+import argparse
+
+
 import torch
 
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, AutoModelForImageTextToText, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration
 from qwen_vl_utils import process_vision_info
+
+from pycocotools.coco import COCO
+from pycocotools.cocoeval import COCOeval
 
 
 from PIL import Image, ImageDraw
@@ -15,6 +26,8 @@ import re
 import numpy as np
 
 import random
+
+
 
 
 def set_seed(seed):
