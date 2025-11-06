@@ -1,6 +1,9 @@
 
 
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+import os
+os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
 
 from tqdm import tqdm
 import gc
