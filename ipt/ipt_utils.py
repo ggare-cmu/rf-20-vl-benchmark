@@ -339,7 +339,7 @@ def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_pro
     #         question += f"Question-{idx}: {promptTemplate(det)} \n"
             
 
-    def getPrompt(det, class_name_list, dataset_instructions_json):
+    def getPrompt(batch_det_bboxes, class_name_list, dataset_instructions_json):
 
 
         def questionTemplate(det, idx):
@@ -370,7 +370,7 @@ def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_pro
             Questions:
         """
 
-        for idx, det in enumerate(det_bboxes):
+        for idx, det in enumerate(batch_det_bboxes):
             question += questionTemplate(det, idx) + "\n"
 
         return question
