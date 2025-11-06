@@ -27,7 +27,7 @@ import numpy as np
 
 import random
 
-
+import math
 
 
 def set_seed(seed):
@@ -162,6 +162,226 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=2
 
 
 
+# vLLM code
+
+# from vllm import LLM, SamplingParams, PromptStrictInputs
+# from transformers import AutoProcessor
+# from PIL import Image
+
+# def load_qwen_model_vllm_multimodal(model_name: str):
+#     model_path = f"Qwen/{model_name}"
+#     dtype = "bfloat8" if model_name.startswith("Qwen3-VL-235B") else "bfloat16"
+
+#     llm = LLM(
+#         model=model_path,
+#         dtype=dtype,
+#         trust_remote_code=True,
+#         tensor_parallel_size="auto",
+#         gpu_memory_utilization=0.9,
+#     )
+
+#     processor = AutoProcessor.from_pretrained(model_path)
+#     processor.tokenizer.padding_side = "left"
+
+#     print(f"✅ Loaded {model_name} with left padding for tokenizer.")
+#     return llm, processor
+
+
+# def model_generate_vllm_multiimage(messages, llm, processor, image_paths, max_new_tokens=2048):
+#     """
+#     messages: list of dicts like [{"role": "user", "content": "Compare these two scans"}]
+#     image_paths: list of image file paths (one per <image_i> token)
+#     """
+
+#     # 1️⃣ Load and convert all images to RGB
+#     images = [Image.open(p).convert("RGB") for p in image_paths]
+
+
+#     # 2️⃣ Run processor manually ONCE to get grid info
+#     # This step mirrors your old HF pipeline
+#     dummy_inputs = processor(
+#         text=["."],  # placeholder text
+#         images=images,
+#         padding=True,
+#         return_tensors="pt"
+#     )
+
+#     # 2️⃣ Insert <image_i> placeholders into the prompt
+#     # Example: "<image_1><image_2>\nDescribe similarities and differences."
+#     num_imgs = len(images)
+#     image_tokens = "".join([f"<image_{i+1}>" for i in range(num_imgs)])
+
+#     text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+#     prompt = f"{image_tokens}\n{text_input}"
+
+#     # 3️⃣ Construct multimodal input
+#     inputs = PromptStrictInputs(
+#         prompt=prompt,
+#         multi_modal_data={"image": images}
+#     )
+
+#     # 4️⃣ Define decoding parameters
+#     sampling_params = SamplingParams(
+#         temperature=0.2,
+#         top_p=0.9,
+#         max_tokens=max_new_tokens,
+#     )
+
+#     # 5️⃣ Run generation
+#     outputs = llm.generate([inputs], sampling_params)
+#     response_text = outputs[0].outputs[0].text.strip()
+
+#     # return response_text, inputs
+#     return response_text, dummy_inputs
+
+
+# # def model_generate_vllm_with_scores(messages, llm, processor, image_paths=None, max_new_tokens=2):
+# def model_generate_vllm_with_scores(messages, llm, processor, images, max_new_tokens=2):
+#     """
+#     Generate with token-level logprobs (scores) using vLLM.
+#     Supports text-only and multi-image multimodal prompts.
+#     """
+
+#     # Build multimodal input
+#     # if image_paths:
+#     #     images = [Image.open(p).convert("RGB") for p in image_paths]
+#     #     image_tokens = "".join([f"<image_{i+1}>" for i in range(len(images))])
+#     # else:
+#     #     images, image_tokens = None, ""
+#     image_tokens = "".join([f"<image_{i+1}>" for i in range(len(images))])
+
+#     prompt_text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+#     prompt = f"{image_tokens}\n{prompt_text}"
+
+#     inputs = PromptStrictInputs(prompt=prompt, multi_modal_data={"image": images} if images else None)
+
+#     # ⚙️ Sampling params with logprobs enabled
+#     sampling_params = SamplingParams(
+#         temperature=0.0,
+#         max_tokens=max_new_tokens,
+#         # logprobs=5,  # Return top-5 logprobs for each generated token
+#         logprobs=50,  # Return top-5 logprobs for each generated token
+#     )
+
+#     outputs = llm.generate([inputs], sampling_params)
+
+#     # # Access text
+#     # text = outputs[0].outputs[0].text
+
+#     # # Access token log-probabilities
+#     # token_scores = outputs[0].outputs[0].logprobs  # list of dicts (one per token)
+
+#     # print("\n--- Generated text ---\n", text)
+#     # print("\n--- Log-probabilities ---")
+#     # for i, token_info in enumerate(token_scores):
+#     #     print(f"Token {i}: {token_info}")
+
+#     # return text, token_scores
+
+#     return outputs
+
+from vllm import LLM, SamplingParams
+from transformers import AutoProcessor
+from PIL import Image
+
+
+def load_qwen_model_vllm_multimodal(model_name: str):
+    """
+    Load a Qwen multimodal (VL) model using vLLM.
+    """
+    model_path = f"Qwen/{model_name}"
+    dtype = "bfloat8" if model_name.startswith("Qwen3-VL-235B") else "bfloat16"
+
+    llm = LLM(
+        model=model_path,
+        dtype=dtype,
+        # trust_remote_code=True,
+        # tensor_parallel_size="auto",
+        gpu_memory_utilization=0.9,
+    )
+
+    processor = AutoProcessor.from_pretrained(model_path)
+    processor.tokenizer.padding_side = "left"
+
+    print(f"✅ Loaded {model_name} with left padding for tokenizer.")
+    return llm, processor
+
+
+def model_generate_vllm_multiimage(messages, llm, processor, image_paths, max_new_tokens=2048):
+    """
+    Multimodal generation with multiple images (modern vLLM API).
+    Returns generated text and dummy processor inputs for grid scaling.
+    """
+    # 1️⃣ Load images
+    images = [Image.open(p).convert("RGB") for p in image_paths]
+
+    # 2️⃣ Extract grid info for scaling later (using HF processor)
+    dummy_inputs = processor(text=["."], images=images, padding=True, return_tensors="pt")
+
+    image_grid_thw = dummy_inputs.get("image_grid_thw", None)
+    if image_grid_thw is not None:
+        input_height = image_grid_thw[0][1].item() * 14
+        input_width = image_grid_thw[0][2].item() * 14
+        print(f"🔹 image_grid_thw={image_grid_thw.tolist()} → {input_width}×{input_height}")
+    else:
+        input_height = input_width = None
+        print("⚠️ No image_grid_thw found (check processor version).")
+
+    # 3️⃣ Prepare prompt with image placeholders
+    image_tokens = "".join([f"<image_{i+1}>" for i in range(len(images))])
+    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt = f"{image_tokens}\n{text_input}"
+
+    # 4️⃣ vLLM input format
+    vllm_input = {
+        "prompt": prompt,
+        "multi_modal_data": {"image": images},
+    }
+
+    # 5️⃣ Define decoding parameters
+    sampling_params = SamplingParams(
+        temperature=0.2,
+        top_p=0.9,
+        max_tokens=max_new_tokens,
+    )
+
+    # 6️⃣ Run generation
+    outputs = llm.generate(vllm_input, sampling_params)
+    response_text = outputs[0].outputs[0].text.strip()
+
+    return response_text, {
+        "dummy_inputs": dummy_inputs,
+        "image_grid_thw": image_grid_thw,
+        "input_height": input_height,
+        "input_width": input_width,
+    }
+
+
+def model_generate_vllm_with_scores(messages, llm, processor, images, max_new_tokens=2):
+    """
+    Generate with token-level logprobs (scores) using vLLM.
+    Compatible with multi-image multimodal prompts.
+    """
+    num_images = len(images)
+    image_tokens = "".join([f"<image_{i+1}>" for i in range(num_images)])
+    text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prompt = f"{image_tokens}\n{text_input}"
+
+    vllm_input = {
+        "prompt": prompt,
+        "multi_modal_data": {"image": images},
+    }
+
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        max_tokens=max_new_tokens,
+        logprobs=50,  # request full token logprobs
+    )
+
+    outputs = llm.generate(vllm_input, sampling_params)
+    return outputs
+
+
 # VQA utils
 
 import numpy as np
@@ -210,19 +430,56 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
         # Generate outputs with scores
-        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+        # outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+        outputs = model_generate_vllm_with_scores(conversations, qwen_model, qwen_processor, images=batch_pil_images, max_new_tokens=2)
 
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
+        # # Calculate 'Yes' probability
+        # scores = outputs.scores[0]
+        # probs = torch.nn.functional.softmax(scores, dim=-1)
         
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
+        # yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+        # no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
-    
+        # yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+
+        # all_final_scores.extend(batch_scores.tolist())
+
+        output = outputs[0].outputs[0]
+        text = output.text.strip()
+        logprobs = output.logprobs  # list[dict]: per-token logprob info
+
+        # 3️⃣ Compute token probabilities for "Yes"/"No"
+        # Find tokenizer IDs for "Yes" and "No"
+        tokenizer = qwen_processor.tokenizer
+        yes_token_id = tokenizer.encode("Yes", add_special_tokens=False)[0]
+        no_token_id = tokenizer.encode("No", add_special_tokens=False)[0]
+
+        # The first generated token’s logprobs (usually "Yes" or "No")
+        first_token_logprobs = logprobs[0]["top_logprobs"]
+
+        # Convert to dict {token_id: logprob}
+        id2logprob = {}
+        for t in first_token_logprobs:
+            token_str = t["token"]
+            logp = t["logprob"]
+            tid = tokenizer.convert_tokens_to_ids(token_str)
+            if tid is not None:
+                id2logprob[tid] = logp
+
+        # Extract Yes/No logprobs
+        yes_logp = id2logprob.get(yes_token_id, -float("inf"))
+        no_logp = id2logprob.get(no_token_id, -float("inf"))
+
+        # Convert logprobs to normalized probability
+        yes_prob = math.exp(yes_logp)
+        no_prob = math.exp(no_logp)
+        yes_score = yes_prob / (yes_prob + no_prob + 1e-18)
+
+
+        # all_final_scores.extend(batch_scores.tolist())
+        all_final_scores.append(yes_score)
+        
     return np.array(all_final_scores)
 
 
@@ -629,7 +886,8 @@ def run_qwen_inference(args, model, processor, image_path, dataset_instructions,
         ]
        
 
-    output_text, inputs = model_generate(messages, model, processor)
+    # output_text, inputs = model_generate(messages, model, processor)
+    output_text, inputs = model_generate_vllm_multiimage(messages, model, processor, image_paths = [image_path])
 
 
     #Sample

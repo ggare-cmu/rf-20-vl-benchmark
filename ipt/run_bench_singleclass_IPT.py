@@ -292,7 +292,8 @@ def generate_initial_class_definition(args, model, processor, class_name, initia
 
     messages = [{"role": "user", "content": content}]
    
-    definition, _ = utils.model_generate(messages, model, processor)
+    # definition, _ = utils.model_generate(messages, model, processor)
+    definition, _ = utils.model_generate_vllm_multiimage(messages, model, processor, image_paths = [example["image_path"] for example in few_shot_examples])
 
     # Clean up the definition
     definition = definition.replace(f"The visual characteristics of the '{class_name}' class are:", "").strip()
@@ -340,7 +341,8 @@ def generate_class_definition(args, model, processor, class_name, current_instru
 
     messages = [{"role": "user", "content": content}]
     
-    definition, _ = utils.model_generate(messages, model, processor)
+    # definition, _ = utils.model_generate(messages, model, processor)
+    definition, _ = utils.model_generate_vllm_multiimage(messages, model, processor, image_paths = [example["image_path"] for example in few_shot_examples])
     print(f"Generated definition for '{class_name}': {definition}")
     
     return definition
@@ -389,7 +391,8 @@ def generate_class_definition_withFP(args, model, processor, class_name, current
 
     messages = [{"role": "user", "content": content}]
     
-    definition, _ = utils.model_generate(messages, model, processor) 
+    # definition, _ = utils.model_generate(messages, model, processor) 
+    definition, _ = utils.model_generate_vllm_multiimage(messages, model, processor, image_paths = [correct_image["image_path"], FP_error_image["image_path"]])
     print(f"Generated definition for '{class_name}': {definition}")
 
     return definition
@@ -434,7 +437,8 @@ def generate_class_definition_withFN(args, model, processor, class_name, current
 
     messages = [{"role": "user", "content": content}]
     
-    definition, _ = utils.model_generate(messages, model, processor)
+    # definition, _ = utils.model_generate(messages, model, processor)
+    definition, _ = utils.model_generate_vllm_multiimage(messages, model, processor, image_paths = [correct_image["image_path"], FN_error_image["image_path"]])
     print(f"Generated definition for '{class_name}': {definition}")
 
     return definition
@@ -1223,7 +1227,8 @@ def run_single_dataset_evaluation(args):
 
     print(f"Using model: {args.model_name}")
 
-    model, processor = utils.load_qwen_model(args.model_name)
+    # model, processor = utils.load_qwen_model(args.model_name)
+    model, processor = utils.load_qwen_model_vllm_multimodal(args.model_name)
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")

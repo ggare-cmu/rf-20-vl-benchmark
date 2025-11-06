@@ -272,7 +272,8 @@ def run_single_dataset_evaluation(args):
 
     print(f"Using model: {args.model_name}")
 
-    model, processor = utils.load_qwen_model(args.model_name)
+    # model, processor = utils.load_qwen_model(args.model_name)
+    model, processor = utils.load_qwen_model_vllm_multimodal(args.model_name)
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")

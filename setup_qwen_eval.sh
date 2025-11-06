@@ -52,11 +52,15 @@ conda install -c conda-forge opencv -y
 echo "=== Installing supervision ==="
 conda install -c conda-forge supervision -y
 
-echo "=== INstalling openai ==="
+echo "=== Installing openai ==="
 conda install openai -y
 
 echo "===upgrading numpy==="
 conda install -c conda-forge numpy=2.0.1 -y
+
+echo "=== Installing vllm ==="
+pip install vllm
+
 
 echo "=== installing roboflow ==="
 conda deactivate
