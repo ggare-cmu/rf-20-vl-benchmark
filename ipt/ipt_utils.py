@@ -300,6 +300,177 @@ def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, 
 
 
 
+def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 10):
+    """
+    Scores a batch of images with bounding boxes based on a VQA prompt.
+    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+    """
+    # if not pil_images: return np.array([])
+  
+
+    # def getPrompt(det, class_name_list, dataset_instructions_json):
+
+    #     # question = f"""
+    #     #             You are given the definition of the class '{det['category_name']}': 
+    #     #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+    #     #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
+
+    #     #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
+    #     #             1. The object is entirely inside the box (no visible part extends outside), and 
+    #     #             2. No other object (of any class) is present within the same box.
+
+    #     #             Please answer strictly with 'Yes' or 'No'.
+    #     # """
+
+
+    #     def promptTemplate(det):
+    #         template = f"Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No."
+    #         return template
+        
+    #     question = f"""
+    #         Given the following class names: {class_name_list}, which are defined as follows: {dataset_instructions_json}
+
+    #         Answer the following questions and provide output as a python json dictionary with keys 'Question-idx' and values as (Yes/No):
+    #     """
+
+
+    #     for idx, det in enumerate(det_bboxes):
+    #         question += f"Question-{idx}: {promptTemplate(det)} \n"
+            
+
+    def getPrompt(det, class_name_list, dataset_instructions_json):
+
+
+        def questionTemplate(det, idx):
+            return (
+                f"Question-{idx}: For the object class '{det['category_name']}', "
+                f"is there exactly one complete instance of this object located entirely within "
+                f"the bounding box defined as bbox = {det['bbox_model_xyxy']}? "
+                "The object must be fully contained (no part outside the box) and no other objects should appear inside. "
+                "Please answer strictly with 'Yes' or 'No'."
+            )
+
+        question = f"""
+            You are given the following class names: {class_name_list}, each defined as follows: {dataset_instructions_json}
+
+            Carefully examine the image and answer each question below.
+
+            Provide your final response as a valid Python JSON dictionary where:
+            - Each key is 'Question-<idx>'
+            - Each value is either 'Yes' or 'No'
+
+            Example output format:
+            {{
+            '0': 'Yes',
+            '1': 'No',
+            '2': 'Yes'
+            }}
+
+            Questions:
+        """
+
+        for idx, det in enumerate(det_bboxes):
+            question += questionTemplate(det, idx) + "\n"
+
+        return question
+
+
+    batch_size = 10
+    print(f"Using batch size: {batch_size} for VQA bbox scoring.")
+
+    all_final_scores = []
+    # Process images in batches
+    for i in range(0, len(det_bboxes), batch_size):
+        batch_det_bboxes = det_bboxes[i:i + batch_size]
+        
+        det_classes = set([det['category_name'] for det in batch_det_bboxes])
+
+        # Create conversations for the batch
+        messages = [{"role": "user", "content": [
+                        {"type": "image", "image": image}, 
+                        {"type": "text", "text": getPrompt(batch_det_bboxes, det_classes, dataset_instructions_json)}
+                        ]
+                    }]
+        
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(messages, qwen_model, qwen_processor, max_new_tokens=batch_size*100)
+
+        predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i], dim=-1)) for i in range(len(outputs.scores))]
+        print(f"[{i}] Predicted tokens: {predicted_tokens}")
+
+
+        def getAnwserIndex(predicted_tokens):
+
+            question_answer_map = {}
+
+            current_question_idx = -1
+            current_question = ''
+            answer_index = -1
+            answer = ''
+            for idx, token in enumerate(predicted_tokens):
+                #Find question idx
+                if token.isdigit():
+                    current_question_idx = int(token)
+                    current_question = f"Question-{current_question_idx}"
+                
+                if token.lower() in ['yes', 'no'] and current_question_idx != -1:
+                    answer = token
+                    answer_index = idx
+
+                    
+                    question_answer_map[current_question] = {
+                        'answer': answer,
+                        'answer_index': answer_index,
+                        'question': current_question,
+                        'question_idx': current_question_idx
+                    }
+
+                    #Reset for next question
+                    current_question_idx = -1
+                    current_question = ''
+                    answer_index = -1
+                    answer = ''
+
+            return question_answer_map
+
+
+            
+
+        question_answer_map = getAnwserIndex(predicted_tokens)
+        print(f"[{i}] Found question_answer_map: {question_answer_map}")
+
+        if len(question_answer_map) != len(batch_det_bboxes):
+            print(f"\n\n******\n[{i}] Warning! Number of answers ({len(question_answer_map)}) does not match number of bboxes ({len(batch_det_bboxes)})!\n******\n\n")
+        
+
+        for b, det in enumerate(batch_det_bboxes):
+            qa_key = f"Question-{b}"
+            if qa_key not in question_answer_map:
+                print(f"\n\n******\n[{i}] Warning! {qa_key} not found in question_answer_map!\n******\n\n")
+                all_final_scores.append(0.0)
+                continue
+
+            answer_info = question_answer_map[qa_key]
+            answer_index = answer_info['answer_index']
+
+            # Calculate 'Yes' probability
+            scores = outputs.scores[answer_index]
+            probs = torch.nn.functional.softmax(scores, dim=-1)
+            
+            yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+            no_token_id = qwen_processor.tokenizer.encode("No")[0]
+            
+            yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+            score = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+            all_final_scores.append(score.tolist()[0])
+
+    
+    return np.array(all_final_scores)
+
+
+
+
 def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
     """
     Scores a batch of images with bounding boxes based on a VQA prompt.
@@ -1108,7 +1279,10 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             # vqa_scores = get_masked_image_vqa_scores_with_instructions(
             #     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
-            vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
+            # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+            # )
+            vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
                 model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
             )
         
