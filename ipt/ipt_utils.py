@@ -302,7 +302,7 @@ def load_qwen_model_vllm_multimodal(model_name: str):
     llm = LLM(
         model=model_path,
         dtype=dtype,
-        trust_remote_code=True,
+        # trust_remote_code=True,
         tensor_parallel_size="auto",
         gpu_memory_utilization=0.9,
     )
