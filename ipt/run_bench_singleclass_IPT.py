@@ -901,7 +901,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 
                 else:
                     # Calculate IoU for all pairs
-                    other_cls_iou = [calculate_iou(gt_box, pred_box) for gt_box in other_cls_gt_bboxes]
+                    other_cls_iou = [utils.calculate_iou(gt_box, pred_box) for gt_box in other_cls_gt_bboxes]
 
                     # Find best match 
                     best_other_cls_ious = max(other_cls_iou)
@@ -993,7 +993,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                     det_score = det['score']
                     pred_box = det['bbox']
 
-                    gt_iou_list = [calculate_iou(gt_box, pred_box) for gt_box in gt_bboxes]
+                    gt_iou_list = [utils.calculate_iou(gt_box, pred_box) for gt_box in gt_bboxes]
                     gt_bbox = gt_bboxes[np.argmax(gt_iou_list)] #Best matching GT box
                     gt_iou = max(gt_iou_list) #Best matching GT box IoU
                     
