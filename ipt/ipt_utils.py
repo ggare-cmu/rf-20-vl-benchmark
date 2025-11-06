@@ -226,6 +226,79 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
     return np.array(all_final_scores)
 
 
+def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 8):
+    """
+    Scores a batch of images with bounding boxes based on a VQA prompt.
+    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+    """
+    # if not pil_images: return np.array([])
+    
+    def getDatasetInstructions(dataset_instructions_json, class_name):
+        if class_name in dataset_instructions_json:       
+            dataset_instructions = dataset_instructions_json[class_name]
+        else:
+
+            # Find the matching key ignoring case
+            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
+            if matched_key:
+                dataset_instructions = dataset_instructions_json[matched_key]
+            else:
+                #Throw error
+                raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
+        
+        return dataset_instructions
+
+
+
+    def getPrompt(det, dataset_instructions_json):
+
+        # question = f"""
+        #             You are given the definition of the class '{det['category_name']}': 
+        #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+        #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
+
+        #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
+        #             1. The object is entirely inside the box (no visible part extends outside), and 
+        #             2. No other object (of any class) is present within the same box.
+
+        #             Please answer strictly with 'Yes' or 'No'.
+        # """
+
+        question = f"""
+            Given the '{det['category_name']}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+            Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
+        """
+
+        return question
+
+    all_final_scores = []
+    # Process images in batches
+    for i in range(0, len(det_bboxes), batch_size):
+        batch_det_bboxes = det_bboxes[i:i + batch_size]
+        
+        # Create conversations for the batch
+        conversations = [[{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": getPrompt(det, dataset_instructions_json)}]}] for det in batch_det_bboxes]
+        
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+
+        # Calculate 'Yes' probability
+        scores = outputs.scores[0]
+        probs = torch.nn.functional.softmax(scores, dim=-1)
+        
+        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+        no_token_id = qwen_processor.tokenizer.encode("No")[0]
+        
+        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+        all_final_scores.extend(batch_scores.tolist())
+    
+    return np.array(all_final_scores)
+
+
+
 
 def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
     """
@@ -997,6 +1070,9 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
             det["bbox"] = [abs_x1, abs_y1, abs_w, abs_h]
 
+            # Also store original (unnormalized) xyxy format
+            det["bbox_model_xyxy"] = [x1, y1, x2, y2]
+
         # Accumulate results for all classes
         parsed_bboxes.extend(parsed_bboxes_i)
         raw_output += f"\n\n--- For class '{class_name}' ---\n{raw_output_i}"
@@ -1009,28 +1085,31 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     if args.vqa_rescore and parsed_bboxes:
         # original_image = Image.open(image_path).convert("RGB")
         
-        # Create a list of images, each with one bounding box drawn
-        vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
+        # # Create a list of images, each with one bounding box drawn
+        # vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
         
         # Get VQA scores for all bboxes in a single batch call
         # We use the category name of the first detection as the prompt for the whole batch,
         # assuming all detections in this context are for the same class.
         # vqa_prompt = parsed_bboxes[0]["category_name"]
-        vqa_prompts = [det["category_name"] for det in parsed_bboxes]
+        # vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
         # vqa_scores = get_masked_image_vqa_scores(
         #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
         # )
         if args.class_rescore:
             vqa_dict = get_masked_image_vqa_class_scores(
-                model, processor, vqa_prompts, vqa_images, class_name_list, batch_size=args.vqa_batch_size
+                model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
             )
         else:
             # vqa_scores = get_masked_image_vqa_scores(
             #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
-            vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            # vqa_scores = get_masked_image_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            # )
+            vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
+                model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
             )
         
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
