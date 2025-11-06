@@ -408,17 +408,16 @@ def apply_nms(detections, iou_threshold=0.5):
 
 
 
-# def run_qwen_inference(args, model, processor, image_path, dataset_instructions, class_name_list, no_instructions=False, few_shot_examples=None):
-def run_qwen_inference(args, model, processor, image_path, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None, image=None):
+def run_qwen_inference(args, model, processor, image_path, dataset_instructions, class_name, no_instructions=False, few_shot_examples=None):
     """
     Given a model, processor, local image path, instructions (from README), 
     and the current image's filename, run Qwen2.5-VL and return the raw text output.
     """
     set_seed(args.seed)
 
-    #image = Image.open(image_path).convert("RGB")
-    if image is None:
-        image = Image.open(image_path).convert("RGB")
+    # #image = Image.open(image_path).convert("RGB")
+    # if image is None:
+    #     image = Image.open(image_path).convert("RGB")
 
 
     if no_instructions:
@@ -886,7 +885,7 @@ def build_few_shot_dict(dataset_path, examples_per_class=2, coco_override=None):
                 viz_dir, f"few_shot_{cat_name}_{os.path.basename(img_info['file_name'])}"
             )
 
-            utils.visualize_bboxes(
+            visualize_bboxes(
                 image_path=image_path,
                 pred_bboxes=[],  # no predictions, only GT
                 gt_bboxes=gt_bboxes,
@@ -1013,7 +1012,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # vqa_prompt = parsed_bboxes[0]["category_name"]
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
-        # vqa_scores = utils.get_masked_image_vqa_scores(
+        # vqa_scores = get_masked_image_vqa_scores(
         #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
         # )
         if args.class_rescore:
@@ -1021,7 +1020,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
                 model, processor, vqa_prompts, vqa_images, class_name_list, batch_size=args.vqa_batch_size
             )
         else:
-            # vqa_scores = utils.get_masked_image_vqa_scores(
+            # vqa_scores = get_masked_image_vqa_scores(
             #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
             vqa_scores = get_masked_image_vqa_scores_with_instructions(
