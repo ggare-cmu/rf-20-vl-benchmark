@@ -411,7 +411,8 @@ def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_pro
             for idx, token in enumerate(predicted_tokens):
                 #Find question idx
                 if token.isdigit():
-                    current_question_idx = int(token)
+                    # current_question_idx = int(token)
+                    current_question_idx = idx
                     current_question = f"Question-{current_question_idx}"
                 
                 if token.lower() in ['yes', 'no'] and current_question_idx != -1:
