@@ -162,7 +162,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     image_path=image_path,
                     dataset_instructions_json = dataset_instructions_json,
                     # class_name_list=ds_cat_names, #GRG: Pass the entire list of category names
-                    class_name=[eval_class_name],
+                    class_name_list=[eval_class_name],
                     no_instructions=no_instructions,
                     few_shot_dict=few_shot_dict,
                     output_dir=output_dir,
