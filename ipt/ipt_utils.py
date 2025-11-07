@@ -145,7 +145,8 @@ def model_generate(messages, model, processor):
 
 
 
-def model_generate_with_scores(conversations, model, processor, max_new_tokens=2):
+# def model_generate_with_scores(conversations, model, processor, max_new_tokens=2):
+def model_generate_with_scores(conversations, model, processor, max_new_tokens=1):
     # conversations is a list of message lists
 
     # Prepare inputs for the model
@@ -166,12 +167,12 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=2
 
 import numpy as np
 
-def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, prompt_list, pil_images: list, batch_size: int = 8):
+def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, prompt_list, batch_size: int = 8):
     """
     Scores a batch of images with bounding boxes based on a VQA prompt.
     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
     """
-    if not pil_images: return np.array([])
+    # if not pil_images: return np.array([])
     
     def getDatasetInstructions(dataset_instructions_json, class_name):
         if class_name in dataset_instructions_json:       
@@ -199,15 +200,19 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         """
 
         return question
+    
+        
+    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+    no_token_id = qwen_processor.tokenizer.encode("No")[0]
 
     all_final_scores = []
     # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
+    for i in range(0, len(prompt_list), batch_size):
+        # batch_pil_images = pil_images[i:i + batch_size]
         batch_prompts = prompt_list[i:i + batch_size]
         
         # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
+        conversations = [[{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for prompt in batch_prompts]
         
         # Generate outputs with scores
         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
@@ -215,9 +220,6 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         # Calculate 'Yes' probability
         scores = outputs.scores[0]
         probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
@@ -272,6 +274,9 @@ def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, 
         """
 
         return question
+        
+    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+    no_token_id = qwen_processor.tokenizer.encode("No")[0]
 
     all_final_scores = []
     # Process images in batches
@@ -287,9 +292,6 @@ def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, 
         # Calculate 'Yes' probability
         scores = outputs.scores[0]
         probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
@@ -379,6 +381,9 @@ def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_pro
     batch_size = 10
     print(f"Using batch size: {batch_size} for VQA bbox scoring.")
 
+    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+    no_token_id = qwen_processor.tokenizer.encode("No")[0]
+
     all_final_scores = []
     # Process images in batches
     for i in range(0, len(det_bboxes), batch_size):
@@ -459,8 +464,6 @@ def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_pro
             scores = outputs.scores[answer_index]
             probs = torch.nn.functional.softmax(scores, dim=-1)
             
-            yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-            no_token_id = qwen_processor.tokenizer.encode("No")[0]
             
             yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
             score = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
@@ -484,6 +487,10 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
         return question
 
+        
+    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+    no_token_id = qwen_processor.tokenizer.encode("No")[0]
+    
     all_final_scores = []
     # Process images in batches
     for i in range(0, len(pil_images), batch_size):
@@ -499,9 +506,6 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         # Calculate 'Yes' probability
         scores = outputs.scores[0]
         probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-        no_token_id = qwen_processor.tokenizer.encode("No")[0]
         
         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
@@ -1264,7 +1268,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # We use the category name of the first detection as the prompt for the whole batch,
         # assuming all detections in this context are for the same class.
         # vqa_prompt = parsed_bboxes[0]["category_name"]
-        # vqa_prompts = [det["category_name"] for det in parsed_bboxes]
+        vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
         # vqa_scores = get_masked_image_vqa_scores(
         #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
@@ -1277,15 +1281,15 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             # vqa_scores = get_masked_image_vqa_scores(
             #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
-            # vqa_scores = get_masked_image_vqa_scores_with_instructions(
-            #     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            # )
+            vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                model, processor, dataset_instructions_json, original_image, vqa_prompts, batch_size=args.vqa_batch_size
+            )
             # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
             #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
             # )
-            vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
-            )
+            # vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+            # )
         
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
 
