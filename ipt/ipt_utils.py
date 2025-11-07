@@ -167,7 +167,7 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
 
 import numpy as np
 
-def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, prompt_list, batch_size: int = 8):
+def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, prompt_list, pil_images: list, batch_size: int = 8):
     """
     Scores a batch of images with bounding boxes based on a VQA prompt.
     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
@@ -207,12 +207,12 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
 
     all_final_scores = []
     # Process images in batches
-    for i in range(0, len(prompt_list), batch_size):
-        # batch_pil_images = pil_images[i:i + batch_size]
+    for i in range(0, len(pil_images), batch_size):
+        batch_pil_images = pil_images[i:i + batch_size]
         batch_prompts = prompt_list[i:i + batch_size]
         
         # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for prompt in batch_prompts]
+        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
         # Generate outputs with scores
         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
@@ -1262,7 +1262,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # original_image = Image.open(image_path).convert("RGB")
         
         # # Create a list of images, each with one bounding box drawn
-        # vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
+        vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
         
         # Get VQA scores for all bboxes in a single batch call
         # We use the category name of the first detection as the prompt for the whole batch,
@@ -1282,7 +1282,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
             vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, original_image, vqa_prompts, batch_size=args.vqa_batch_size
+                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             )
             # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
             #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
