@@ -105,7 +105,7 @@ def load_qwen_model(model_name):
     #                     f"Qwen/{model_name}", 
     #                     # trust_remote_code=True
     #                 )
-    model.eval()
+    # model.eval()
 
 
 
