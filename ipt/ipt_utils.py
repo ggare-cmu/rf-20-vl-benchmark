@@ -147,7 +147,8 @@ def load_qwen_model(model_name):
 def model_generate(messages, model, processor):
     text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(messages)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    # inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt")
 
     with torch.no_grad():
         # generated_ids = model.generate(**inputs, max_new_tokens=512)
@@ -187,7 +188,8 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
     # Prepare inputs for the model
     text_input = processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(conversations)
-    inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    # inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt")
     
     with torch.no_grad():
         # generated_ids = model.generate(**inputs, max_new_tokens=512)
