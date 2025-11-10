@@ -61,7 +61,7 @@ def load_qwen_model(model_name):
     # elif(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
     
     # dtype = torch.bfloat8 if model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") else torch.bfloat16
-    dtype = "bfloat8" if model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") else torch.bfloat16
+    dtype = "auto" if model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") else torch.bfloat16
     print(f"Loading using LLM class from vLLM with dtype: {dtype}")
 
     enable_expert_parallel = True if (model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") or model_name.startswith("Qwen3-VL-30B-A3B-Instruct")) else False
