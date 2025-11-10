@@ -4,6 +4,8 @@ Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_IPT.py --mode
 
 import os
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
+
 import json
 import torch
 from PIL import Image
@@ -25,7 +27,6 @@ import run_bench_singleclass_evaluator as evaluator
 import ipt_utils as utils
 
 
-os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
 
 def get_seed_state():

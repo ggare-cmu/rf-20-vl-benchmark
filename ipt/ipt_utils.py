@@ -1,4 +1,8 @@
 
+import os
+os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
+
+from vllm import LLM, SamplingParams
 
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -15,11 +19,9 @@ from qwen_vl_utils import process_vision_info
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from vllm import SamplingParams
 
 from PIL import Image, ImageDraw
 
-import os
 import json
 import time
 import re
@@ -45,57 +47,61 @@ def load_qwen_model(model_name):
    
     model = None
    
-    assert model_name == "Qwen3-VL-235B-A22B-Instruct-FP8", "Error: Only Qwen3-VL-235B-A22B-Instruct-FP8 is supported in this setup."
+    # assert model_name == "Qwen3-VL-235B-A22B-Instruct-FP8", "Error: Only Qwen3-VL-235B-A22B-Instruct-FP8 is supported in this setup."
    
-    if(model_name.startswith("Qwen2.5-VL")): 
-        print("Loading using Qwen2_5_VLForConditionalGeneration")
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/"+model_name,
-        dtype= torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        device_map="auto"
+    # if(model_name.startswith("Qwen2.5-VL")): 
+    #     print("Loading using Qwen2_5_VLForConditionalGeneration")
+    #     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+    #     "Qwen/"+model_name,
+    #     dtype= torch.bfloat16,
+    #     attn_implementation="flash_attention_2",
+    #     device_map="auto"
+    # )
+        
+    # elif(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
+    
+    dtype = torch.bfloat8 if model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") else torch.bfloat16
+    print(f"Loading using LLM class from vLLM with dtype: {dtype}")
+
+    model = LLM(
+        model="Qwen/"+model_name,
+        dtype=dtype,
+        trust_remote_code=True,
+        gpu_memory_utilization=0.80,
+        enforce_eager=False,
+        enable_expert_parallel = True,
+        # max_model_len=700,
+        tensor_parallel_size=torch.cuda.device_count(),
+        seed=0
     )
         
-    elif(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
-        from vllm import LLM
-        model = LLM(
-            model="Qwen/"+model_name,
-            trust_remote_code=True,
-            gpu_memory_utilization=0.80,
-            enforce_eager=False,
-            enable_expert_parallel = True,
-            # max_model_len=700,
-            tensor_parallel_size=torch.cuda.device_count(),
-            seed=0
-        )
-        
-    elif(model_name.startswith("Qwen3-VL-235B") or model_name.startswith("Qwen3-VL-30B")):
-        print("Loading using Qwen3VLMoeForConditionalGeneration")
-        model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-            # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-            "Qwen/"+model_name, 
-            dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16, 
-            attn_implementation="flash_attention_2", device_map="auto"
-        ) 
+    # elif(model_name.startswith("Qwen3-VL-235B") or model_name.startswith("Qwen3-VL-30B")):
+    #     print("Loading using Qwen3VLMoeForConditionalGeneration")
+    #     model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
+    #         # "Qwen/"+model_name, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+    #         "Qwen/"+model_name, 
+    #         dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16, 
+    #         attn_implementation="flash_attention_2", device_map="auto"
+    #     ) 
 
-    elif(model_name.startswith("Qwen3-VL")):
-        print("Loading using Qwen3VLForConditionalGeneration")
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
-        )
+    # elif(model_name.startswith("Qwen3-VL")):
+    #     print("Loading using Qwen3VLForConditionalGeneration")
+    #     model = Qwen3VLForConditionalGeneration.from_pretrained(
+    #         "Qwen/"+model_name, dtype=torch.bfloat16, attn_implementation="flash_attention_2", device_map="auto"
+    #     )
         
-        # print("Loading using AutoModelForImageTextToText")
-        # model = AutoModelForImageTextToText.from_pretrained(
-        #                 f"Qwen/{model_name}",
-        #                 # trust_remote_code=True,
-        #                 dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
-        #                 attn_implementation="flash_attention_2",
-        #                 device_map="auto"
-        #             )
+    #     # print("Loading using AutoModelForImageTextToText")
+    #     # model = AutoModelForImageTextToText.from_pretrained(
+    #     #                 f"Qwen/{model_name}",
+    #     #                 # trust_remote_code=True,
+    #     #                 dtype=torch.bfloat8 if model_name.startswith("Qwen3-VL-235B") else torch.bfloat16,
+    #     #                 attn_implementation="flash_attention_2",
+    #     #                 device_map="auto"
+    #     #             )
     
-    else:
-        print("Error: Invalid model name")
-        return None, None
+    # else:
+    #     print("Error: Invalid model name")
+    #     return None, None
 
 
     # print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
