@@ -98,7 +98,7 @@ def load_qwen_model(model_name):
         return None, None
 
 
-    print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
+    # print(f"\n\nLoaded the model with the following config: \n\n{model.config.model_type}\n\n")
 
     processor = AutoProcessor.from_pretrained("Qwen/"+model_name)
     # processor = AutoProcessor.from_pretrained(
