@@ -572,27 +572,12 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     dataset_result_dir = os.path.join(result_dir, dataset_name)
     os.makedirs(dataset_result_dir, exist_ok=True)
 
-    # --- Resume Logic ---
-    all_iterm_refined_instructions_path = os.path.join(result_dir, f"all_iterm_refined_class_instructions_{dataset_name}.json")
-    refined_class_instructions_json = {}
-    if os.path.exists(all_iterm_refined_instructions_path):
-        print(f"Found existing refined instructions file. Loading to resume: {all_iterm_refined_instructions_path}")
-        try:
-            with open(all_iterm_refined_instructions_path, "r", encoding="utf-8") as f:
-                refined_class_instructions_json = json.load(f)
-            print(f"Resuming. Loaded {len(refined_class_instructions_json)} completed class definitions.")
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Could not read or parse existing instructions file. Starting from scratch. Error: {e}")
-            refined_class_instructions_json = {}
-
     # --- Step 0: Generate initial class definitions from all GT examples ---
     
+    refined_class_instructions_json = {}
     for cat_id in ds_cat_ids: #GRG: This iterates over all categories in the dataset - which can is the right thing to do here - but can penalize results as we expect the model to predict all categories in each image
         class_name = coco_gt.cats[cat_id]["name"]
     
-        if class_name in refined_class_instructions_json:
-            print(f"Skipping class '{class_name}' as its definition already exists in the results file.")
-            continue
 
         # --- Step 0: Generate class definition ---
 
@@ -692,99 +677,89 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             print(f"Warning! GT examples count does not match expected number - 10!")
         
 
-        #Check if initial definition with FP refinement already exists - then skip generation
-        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
-        if os.path.exists(init_def_path):
-            print(f"Found existing initial definition for '{class_name}'. Loading from: {init_def_path}")
-            with open(init_def_path, "r", encoding="utf-8") as f:
-                initial_instructions = f.read()
-        else:
-            # Generate the definition
-            print(f"Generating initial definition for '{class_name}' using only GT examples.")
+        # Generate the definition
+        initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
+        
+        # Save the generated initial instructions as text file
+        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_with_only_gt_definition.txt")
+        with open(init_def_path, "w", encoding="utf-8") as f:
+            f.write(initial_instructions)
+        
 
-            # Generate the definition
-            initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
+
+        # --- Step 0: Generate class definition using negative samples ---
+        
+
+        # Get negative examples from other classes
+        for idx, other_cat_id in enumerate(ds_cat_ids):
+            if other_cat_id == cat_id:
+                continue
+
+            other_class_name = coco_gt.cats[other_cat_id]["name"]
             
-            # Save the generated initial instructions as text file
-            init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_with_only_gt_definition.txt")
-            with open(init_def_path, "w", encoding="utf-8") as f:
-                f.write(initial_instructions)
+            other_img_ids = coco_gt.getImgIds(catIds=[other_cat_id])
+
+            if not other_img_ids or len(other_img_ids) == 0:
+                print(f"Warning! No images found for negative category '{other_class_name}' in the dataset.")
+                continue
+
+            # Randomly choose 1 image
+            chosen_other_img_id = random.choice(other_img_ids)
             
+            other_ann_ids = coco_gt.getAnnIds(imgIds=[chosen_other_img_id], catIds=[other_cat_id])
+            other_anns = coco_gt.loadAnns(other_ann_ids)
+
+            other_img_info_list = coco_gt.loadImgs(chosen_other_img_id)
+            if not other_img_info_list:
+                continue
+
+            other_img_info = other_img_info_list[0]
+            other_image_path = os.path.join(train_dir, other_img_info["file_name"])
+            if not os.path.isfile(other_image_path):
+                continue
+
+            # Visualize GT boxes for THIS category only
+            other_gt_bboxes = [ann['bbox'] for ann in other_anns if ann['category_id'] == other_cat_id] #GRG: Only consider GT boxes for the current class
+
+            if len(other_gt_bboxes) == 0:
+                continue
 
 
-            # --- Step 0: Generate class definition using negative samples ---
+            other_img = Image.open(other_image_path).convert("RGB")
             
+            other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
 
-            # Get negative examples from other classes
-            for idx, other_cat_id in enumerate(ds_cat_ids):
-                if other_cat_id == cat_id:
-                    continue
+            other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
+            #Save image
+            other_img_with_boxes.save(other_img_viz_path)
 
-                other_class_name = coco_gt.cats[other_cat_id]["name"]
-                
-                other_img_ids = coco_gt.getImgIds(catIds=[other_cat_id])
+            # fp_examples_for_class = {"image_path": other_img_viz_path}
+            fp_examples_for_class = other_img_with_boxes
 
-                if not other_img_ids or len(other_img_ids) == 0:
-                    print(f"Warning! No images found for negative category '{other_class_name}' in the dataset.")
-                    continue
-
-                # Randomly choose 1 image
-                chosen_other_img_id = random.choice(other_img_ids)
-                
-                other_ann_ids = coco_gt.getAnnIds(imgIds=[chosen_other_img_id], catIds=[other_cat_id])
-                other_anns = coco_gt.loadAnns(other_ann_ids)
-
-                other_img_info_list = coco_gt.loadImgs(chosen_other_img_id)
-                if not other_img_info_list:
-                    continue
-
-                other_img_info = other_img_info_list[0]
-                other_image_path = os.path.join(train_dir, other_img_info["file_name"])
-                if not os.path.isfile(other_image_path):
-                    continue
-
-                # Visualize GT boxes for THIS category only
-                other_gt_bboxes = [ann['bbox'] for ann in other_anns if ann['category_id'] == other_cat_id] #GRG: Only consider GT boxes for the current class
-
-                if len(other_gt_bboxes) == 0:
-                    continue
+            # positive_examples_for_class = random.choice(examples_to_use)
+            if len(examples_to_use) > idx:
+                positive_examples_for_class = examples_to_use[idx]
+            else:
+                positive_examples_for_class = random.choice(examples_to_use)
 
 
-                other_img = Image.open(other_image_path).convert("RGB")
-                
-                other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
-
-                other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
-                #Save image
-                other_img_with_boxes.save(other_img_viz_path)
-
-                # fp_examples_for_class = {"image_path": other_img_viz_path}
-                fp_examples_for_class = other_img_with_boxes
-
-                # positive_examples_for_class = random.choice(examples_to_use)
-                if len(examples_to_use) > idx:
-                    positive_examples_for_class = examples_to_use[idx]
-                else:
-                    positive_examples_for_class = random.choice(examples_to_use)
-
-
-                # --- Refine prompt for next iteration ---
-                
-                #False-positive focused refinement
-                fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
+            # --- Refine prompt for next iteration ---
             
-                fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
+            #False-positive focused refinement
+            fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
+        
+            fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
 
-                if fp_generated_definition:
-                    initial_instructions = fp_generated_definition
+            if fp_generated_definition:
+                initial_instructions = fp_generated_definition
 
 
-                    # Save the generated initial instructions as text file
-                    init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
-                    with open(init_def_path, "w", encoding="utf-8") as f:
-                        f.write(initial_instructions)
-                            
-            
+                # Save the generated initial instructions as text file
+                init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+                with open(init_def_path, "w", encoding="utf-8") as f:
+                    f.write(initial_instructions)
+                        
+           
 
 
         # Save the generated initial instructions as text file
@@ -801,35 +776,9 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         prev_mAP = -1.0
         
         prev_worst_examples_map = {}  # To store worst-performing examples from previous iteration
-        
-        # --- Iteration-level Resume Logic ---
-        iteration_state_path = os.path.join(dataset_result_dir, f"ipt_state_{dataset_name}_{class_name}.json")
-        start_iteration = 0
-        instruction_refinements = {}
-        
-        if os.path.exists(iteration_state_path):
-            print(f"Found existing iteration state file for class '{class_name}'. Loading to resume.")
-            try:
-                with open(iteration_state_path, "r", encoding="utf-8") as f:
-                    state = json.load(f)
-                start_iteration = state.get("last_completed_iteration", -1) + 1
-                current_instructions = state.get("current_instructions", initial_instructions)
-                best_instructions = state.get("best_instructions", initial_instructions)
-                best_mAP = state.get("best_mAP", -1.0)
-                prev_mAP = state.get("prev_mAP", -1.0)
-                prev_instructions = state.get("prev_instructions", initial_instructions)
-                instruction_refinements = state.get("instruction_refinements", {})
-                print(f"Resuming from iteration {start_iteration} for class '{class_name}'.")
-            except (json.JSONDecodeError, IOError, KeyError) as e:
-                print(f"Warning: Could not read or parse iteration state file. Starting from iteration 0. Error: {e}")
-                start_iteration = 0
-                instruction_refinements = {}
 
-        if start_iteration >= num_iterations:
-            print(f"All {num_iterations} iterations already completed for class '{class_name}'. Skipping.")
-            continue
-
-        for i in range(start_iteration, num_iterations):
+        instruction_refinements = {}    
+        for i in range(num_iterations):
             
             print(f"\n\n\n--- Iteration {i} for class '{class_name}' ---\n\n\n")
 
@@ -1207,26 +1156,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                         f.write(f"Generated Analysis for False-Positive based Class Definition:\n{fp_generated_definition_analysis}\n\n")
                         f.write(f"Refined Instructions:\n{current_instructions}\n")
 
-            
             # Display the analysis
             
-             # --- Iteration-level Save for Resume ---
-            print(f"Finished iteration {i} for class '{class_name}'. Saving state.")
-            iteration_state = {
-                "last_completed_iteration": i,
-                "current_instructions": current_instructions,
-                "best_instructions": best_instructions,
-                "best_mAP": best_mAP,
-                "prev_mAP": prev_mAP,
-                "prev_instructions": prev_instructions,
-                "instruction_refinements": instruction_refinements,
-            }
-            with open(iteration_state_path, "w", encoding="utf-8") as f:
-                json.dump(iteration_state, f, indent=2)
-            print(f"Saved iteration state to {iteration_state_path}")
-
-            
-
 
         #Display Initial Instructions
         
@@ -1264,12 +1195,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
         refined_class_instructions_json[class_name] = best_instructions
-
-        # --- Incremental Save for Resume ---
-        print(f"\nFinished processing class '{class_name}'. Saving intermediate results to allow for resuming.")
-        with open(all_iterm_refined_instructions_path, "w", encoding="utf-8") as f:
-            json.dump(refined_class_instructions_json, f, indent=2)
-        print(f"Saved intermediate refined instructions to {all_iterm_refined_instructions_path}\n")
 
 
     # Save all refined class instructions
