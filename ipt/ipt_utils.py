@@ -15,6 +15,7 @@ from qwen_vl_utils import process_vision_info
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
+from vllm import SamplingParams
 
 from PIL import Image, ImageDraw
 
@@ -44,6 +45,7 @@ def load_qwen_model(model_name):
    
     model = None
    
+    assert model_name == "Qwen3-VL-235B-A22B-Instruct-FP8", "Error: Only Qwen3-VL-235B-A22B-Instruct-FP8 is supported in this setup."
    
     if(model_name.startswith("Qwen2.5-VL")): 
         print("Loading using Qwen2_5_VLForConditionalGeneration")
@@ -53,6 +55,19 @@ def load_qwen_model(model_name):
         attn_implementation="flash_attention_2",
         device_map="auto"
     )
+        
+    elif(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
+        from vllm import LLM
+        model = LLM(
+            model="Qwen/"+model_name,
+            trust_remote_code=True,
+            gpu_memory_utilization=0.80,
+            enforce_eager=False,
+            enable_expert_parallel = True,
+            # max_model_len=700,
+            tensor_parallel_size=torch.cuda.device_count(),
+            seed=0
+        )
         
     elif(model_name.startswith("Qwen3-VL-235B") or model_name.startswith("Qwen3-VL-30B")):
         print("Loading using Qwen3VLMoeForConditionalGeneration")
@@ -135,12 +150,32 @@ def model_generate(messages, model, processor):
     inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
 
     with torch.no_grad():
-        # generated_ids = model.generate(**inputs, max_new_tokens=256)
-        generated_ids = model.generate(**inputs, max_new_tokens=2048)
-    
-    generated_ids_trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs["input_ids"], generated_ids)]
-    output_text = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    
+        # generated_ids = model.generate(**inputs, max_new_tokens=512)
+        # generated_ids = model.generate(**inputs, max_new_tokens=1024)
+        output_text = None
+        # if(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
+            
+        mm_data = {}
+        if image_inputs is not None:
+            mm_data['image'] = image_inputs
+        # if video_inputs is not None:
+        #     mm_data['video'] = video_inputs
+
+        inputs =  {
+            'prompt': text_input,
+            'multi_modal_data': mm_data,
+        }
+        sampling_params = SamplingParams(
+            temperature=0,
+            max_tokens=2048,
+            top_k=-1,
+            stop_token_ids=[],
+        )
+        outputs = model.generate(inputs, sampling_params = sampling_params)
+        for i, output in enumerate(outputs):
+            output_text = output.outputs[0].text
+
+        
     return output_text, inputs
 
 
@@ -150,13 +185,40 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
     # conversations is a list of message lists
 
     # Prepare inputs for the model
-    text = processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
+    text_input = processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(conversations)
-    inputs = processor(text=text, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
+    inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
     
-    # Generate outputs
-    with torch.inference_mode():
-        outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, output_scores=True, return_dict_in_generate=True)
+    with torch.no_grad():
+        # generated_ids = model.generate(**inputs, max_new_tokens=512)
+        # generated_ids = model.generate(**inputs, max_new_tokens=1024)
+        output_text = None
+        # if(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
+            
+        mm_data = {}
+        if image_inputs is not None:
+            mm_data['image'] = image_inputs
+        # if video_inputs is not None:
+        #     mm_data['video'] = video_inputs
+
+        inputs =  {
+            'prompt': text_input,
+            'multi_modal_data': mm_data,
+        }
+        sampling_params = SamplingParams(
+            temperature=0,
+            max_tokens=2048,
+            top_k=-1,
+            logprobs=1,   # get top-5 logprobs per token
+            stop_token_ids=[],
+        )
+        outputs = model.generate(inputs, sampling_params = sampling_params)
+        # for i, output in enumerate(outputs):
+        #     output_text = output.outputs[0].text
+
+    # # Generate outputs
+    # with torch.inference_mode():
+    #     outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, output_scores=True, return_dict_in_generate=True)
     
     
     return outputs
@@ -217,301 +279,335 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         # Generate outputs with scores
         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
 
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
+        # # Calculate 'Yes' probability
+        # scores = outputs.scores[0]
+        # probs = torch.nn.functional.softmax(scores, dim=-1)
         
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
-    
-    return np.array(all_final_scores)
+        # yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+        # all_final_scores.extend(batch_scores.tolist())
 
+        for output in outputs:
+            token_logprobs = output.outputs[0].logprobs  # list[dict]
 
-def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    # if not pil_images: return np.array([])
-    
-    def getDatasetInstructions(dataset_instructions_json, class_name):
-        if class_name in dataset_instructions_json:       
-            dataset_instructions = dataset_instructions_json[class_name]
-        else:
+            # Initialize scores
+            yes_logprob = None
+            no_logprob = None
 
-            # Find the matching key ignoring case
-            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
-            if matched_key:
-                dataset_instructions = dataset_instructions_json[matched_key]
-            else:
-                #Throw error
-                raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
-        
-        return dataset_instructions
+            # Look through generated tokens and their top_logprobs
+            for token_info in token_logprobs:
+                top_logprobs = token_info["top_logprobs"]
+                if "Yes" in top_logprobs:
+                    yes_logprob = top_logprobs["Yes"]
+                if "No" in top_logprobs:
+                    no_logprob = top_logprobs["No"]
 
-
-
-    def getPrompt(det, dataset_instructions_json):
-
-        # question = f"""
-        #             You are given the definition of the class '{det['category_name']}': 
-        #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
-
-        #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
-
-        #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
-        #             1. The object is entirely inside the box (no visible part extends outside), and 
-        #             2. No other object (of any class) is present within the same box.
-
-        #             Please answer strictly with 'Yes' or 'No'.
-        # """
-
-        question = f"""
-            Given the '{det['category_name']}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
-
-            Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
-        """
-
-        return question
-        
-    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-    no_token_id = qwen_processor.tokenizer.encode("No")[0]
-
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(det_bboxes), batch_size):
-        batch_det_bboxes = det_bboxes[i:i + batch_size]
-        
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": getPrompt(det, dataset_instructions_json)}]}] for det in batch_det_bboxes]
-        
-        # Generate outputs with scores
-        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
-
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
-        
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
-    
-    return np.array(all_final_scores)
-
-
-
-
-def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 10):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    # if not pil_images: return np.array([])
-  
-
-    # def getPrompt(det, class_name_list, dataset_instructions_json):
-
-    #     # question = f"""
-    #     #             You are given the definition of the class '{det['category_name']}': 
-    #     #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
-
-    #     #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
-
-    #     #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
-    #     #             1. The object is entirely inside the box (no visible part extends outside), and 
-    #     #             2. No other object (of any class) is present within the same box.
-
-    #     #             Please answer strictly with 'Yes' or 'No'.
-    #     # """
-
-
-    #     def promptTemplate(det):
-    #         template = f"Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No."
-    #         return template
-        
-    #     question = f"""
-    #         Given the following class names: {class_name_list}, which are defined as follows: {dataset_instructions_json}
-
-    #         Answer the following questions and provide output as a python json dictionary with keys 'Question-idx' and values as (Yes/No):
-    #     """
-
-
-    #     for idx, det in enumerate(det_bboxes):
-    #         question += f"Question-{idx}: {promptTemplate(det)} \n"
-            
-
-    def getPrompt(batch_det_bboxes, class_name_list, dataset_instructions_json):
-
-
-        def questionTemplate(det, idx):
-            return (
-                f"Question-{idx}: For the object class '{det['category_name']}', "
-                f"is there exactly one complete instance of this object located entirely within "
-                f"the bounding box defined as bbox = {det['bbox_model_xyxy']}? "
-                "The object must be fully contained (no part outside the box) and no other objects should appear inside. "
-                "Please answer strictly with 'Yes' or 'No'."
-            )
-
-        question = f"""
-            You are given the following class names: {class_name_list}, each defined as follows: {dataset_instructions_json}
-
-            Carefully examine the image and answer each question below.
-
-            Provide your final response as a valid Python JSON dictionary where:
-            - Each key is 'Question-<idx>'
-            - Each value is either 'Yes' or 'No'
-
-            Example output format:
-            {{
-            '0': 'Yes',
-            '1': 'No',
-            '2': 'Yes'
-            }}
-
-            Questions:
-        """
-
-        for idx, det in enumerate(batch_det_bboxes):
-            question += questionTemplate(det, idx) + "\n"
-
-        return question
-
-
-    batch_size = 10
-    print(f"Using batch size: {batch_size} for VQA bbox scoring.")
-
-    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-    no_token_id = qwen_processor.tokenizer.encode("No")[0]
-
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(det_bboxes), batch_size):
-        batch_det_bboxes = det_bboxes[i:i + batch_size]
-        
-        det_classes = set([det['category_name'] for det in batch_det_bboxes])
-
-        # Create conversations for the batch
-        messages = [{"role": "user", "content": [
-                        {"type": "image", "image": image}, 
-                        {"type": "text", "text": getPrompt(batch_det_bboxes, det_classes, dataset_instructions_json)}
-                        ]
-                    }]
-        
-        # Generate outputs with scores
-        outputs = model_generate_with_scores(messages, qwen_model, qwen_processor, max_new_tokens=batch_size*100)
-
-        predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i], dim=-1)) for i in range(len(outputs.scores))]
-        print(f"[{i}] Predicted tokens: {predicted_tokens}")
-
-
-        def getAnwserIndex(predicted_tokens):
-
-            question_answer_map = {}
-
-            current_question_idx = -1
-            current_question = ''
-            answer_index = -1
-            answer = ''
-            for idx, token in enumerate(predicted_tokens):
-                #Find question idx
-                if token.isdigit():
-                    # current_question_idx = int(token)
-                    current_question_idx = idx
-                    current_question = f"Question-{token}"
-                
-                if token.lower() in ['yes', 'no'] and current_question_idx != -1:
-                    answer = token
-                    answer_index = idx
-
-                    
-                    question_answer_map[current_question] = {
-                        'answer': answer,
-                        'answer_index': answer_index,
-                        'question': current_question,
-                        'question_idx': current_question_idx
-                    }
-
-                    #Reset for next question
-                    current_question_idx = -1
-                    current_question = ''
-                    answer_index = -1
-                    answer = ''
-
-            return question_answer_map
-
-
-            
-
-        question_answer_map = getAnwserIndex(predicted_tokens)
-        print(f"[{i}] Found question_answer_map: {question_answer_map}")
-
-        if len(question_answer_map) != len(batch_det_bboxes):
-            print(f"\n\n******\n[{i}] Warning! Number of answers ({len(question_answer_map)}) does not match number of bboxes ({len(batch_det_bboxes)})!\n******\n\n")
-        
-
-        for b, det in enumerate(batch_det_bboxes):
-            qa_key = f"Question-{b}"
-            if qa_key not in question_answer_map:
-                print(f"\n\n******\n[{i}] Warning! {qa_key} not found in question_answer_map!\n******\n\n")
-                all_final_scores.append(0.0)
+            # If neither found, skip
+            if yes_logprob is None and no_logprob is None:
+                all_final_scores.append(-1.0)
+                continue
+            if yes_logprob is None:
+                no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
+                yes_prob = 1 - no_prob
+                score = yes_prob.item()
+                all_final_scores.append(score)
                 continue
 
-            answer_info = question_answer_map[qa_key]
-            answer_index = answer_info['answer_index']
+            # Convert from logprobs to probabilities
+            yes_prob = torch.exp(torch.tensor(yes_logprob)) if yes_logprob is not None else torch.tensor(0.0)
+            no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
 
-            # Calculate 'Yes' probability
-            scores = outputs.scores[answer_index]
-            probs = torch.nn.functional.softmax(scores, dim=-1)
-            
-            
-            yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-            score = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-            all_final_scores.append(score.tolist()[0])
-
+            # Normalize to get P(Yes)
+            score = yes_prob / (yes_prob + no_prob + 1e-18)
+            all_final_scores.append(score.item())
     
     return np.array(all_final_scores)
 
 
-
-
-def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    if not pil_images: return np.array([])
+# def get_image_textbbox_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 8):
+#     """
+#     Scores a batch of images with bounding boxes based on a VQA prompt.
+#     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+#     """
+#     # if not pil_images: return np.array([])
     
-    def getPrompt(prompt):
-        # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
-        return question
+#     def getDatasetInstructions(dataset_instructions_json, class_name):
+#         if class_name in dataset_instructions_json:       
+#             dataset_instructions = dataset_instructions_json[class_name]
+#         else:
+
+#             # Find the matching key ignoring case
+#             matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
+#             if matched_key:
+#                 dataset_instructions = dataset_instructions_json[matched_key]
+#             else:
+#                 #Throw error
+#                 raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
+        
+#         return dataset_instructions
+
+
+
+#     def getPrompt(det, dataset_instructions_json):
+
+#         # question = f"""
+#         #             You are given the definition of the class '{det['category_name']}': 
+#         #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+#         #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
+
+#         #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
+#         #             1. The object is entirely inside the box (no visible part extends outside), and 
+#         #             2. No other object (of any class) is present within the same box.
+
+#         #             Please answer strictly with 'Yes' or 'No'.
+#         # """
+
+#         question = f"""
+#             Given the '{det['category_name']}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+#             Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
+#         """
+
+#         return question
+        
+#     yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+#     no_token_id = qwen_processor.tokenizer.encode("No")[0]
+
+#     all_final_scores = []
+#     # Process images in batches
+#     for i in range(0, len(det_bboxes), batch_size):
+#         batch_det_bboxes = det_bboxes[i:i + batch_size]
+        
+#         # Create conversations for the batch
+#         conversations = [[{"role": "user", "content": [{"type": "image", "image": image}, {"type": "text", "text": getPrompt(det, dataset_instructions_json)}]}] for det in batch_det_bboxes]
+        
+#         # Generate outputs with scores
+#         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+
+#         # Calculate 'Yes' probability
+#         scores = outputs.scores[0]
+#         probs = torch.nn.functional.softmax(scores, dim=-1)
+        
+#         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+#         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+#         all_final_scores.extend(batch_scores.tolist())
+    
+#     return np.array(all_final_scores)
+
+
+
+
+# def get_image_textbbox_batched_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, image, det_bboxes, batch_size: int = 10):
+#     """
+#     Scores a batch of images with bounding boxes based on a VQA prompt.
+#     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+#     """
+#     # if not pil_images: return np.array([])
+  
+
+#     # def getPrompt(det, class_name_list, dataset_instructions_json):
+
+#     #     # question = f"""
+#     #     #             You are given the definition of the class '{det['category_name']}': 
+#     #     #             {getDatasetInstructions(dataset_instructions_json, det['category_name'])}
+
+#     #     #             Carefully examine the image and the bounding box defined as bbox = {det['bbox_model_xyxy']}.
+
+#     #     #             Question: Does this bounding box fully contain exactly one instance of the object '{det['category_name']}' — meaning:
+#     #     #             1. The object is entirely inside the box (no visible part extends outside), and 
+#     #     #             2. No other object (of any class) is present within the same box.
+
+#     #     #             Please answer strictly with 'Yes' or 'No'.
+#     #     # """
+
+
+#     #     def promptTemplate(det):
+#     #         template = f"Is the main subject or object being referred to as: '{det['category_name']}' located inside the bounding box defined as bbox = {det['bbox_model_xyxy']} in the image? Please answer Yes or No."
+#     #         return template
+        
+#     #     question = f"""
+#     #         Given the following class names: {class_name_list}, which are defined as follows: {dataset_instructions_json}
+
+#     #         Answer the following questions and provide output as a python json dictionary with keys 'Question-idx' and values as (Yes/No):
+#     #     """
+
+
+#     #     for idx, det in enumerate(det_bboxes):
+#     #         question += f"Question-{idx}: {promptTemplate(det)} \n"
+            
+
+#     def getPrompt(batch_det_bboxes, class_name_list, dataset_instructions_json):
+
+
+#         def questionTemplate(det, idx):
+#             return (
+#                 f"Question-{idx}: For the object class '{det['category_name']}', "
+#                 f"is there exactly one complete instance of this object located entirely within "
+#                 f"the bounding box defined as bbox = {det['bbox_model_xyxy']}? "
+#                 "The object must be fully contained (no part outside the box) and no other objects should appear inside. "
+#                 "Please answer strictly with 'Yes' or 'No'."
+#             )
+
+#         question = f"""
+#             You are given the following class names: {class_name_list}, each defined as follows: {dataset_instructions_json}
+
+#             Carefully examine the image and answer each question below.
+
+#             Provide your final response as a valid Python JSON dictionary where:
+#             - Each key is 'Question-<idx>'
+#             - Each value is either 'Yes' or 'No'
+
+#             Example output format:
+#             {{
+#             '0': 'Yes',
+#             '1': 'No',
+#             '2': 'Yes'
+#             }}
+
+#             Questions:
+#         """
+
+#         for idx, det in enumerate(batch_det_bboxes):
+#             question += questionTemplate(det, idx) + "\n"
+
+#         return question
+
+
+#     batch_size = 10
+#     print(f"Using batch size: {batch_size} for VQA bbox scoring.")
+
+#     yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+#     no_token_id = qwen_processor.tokenizer.encode("No")[0]
+
+#     all_final_scores = []
+#     # Process images in batches
+#     for i in range(0, len(det_bboxes), batch_size):
+#         batch_det_bboxes = det_bboxes[i:i + batch_size]
+        
+#         det_classes = set([det['category_name'] for det in batch_det_bboxes])
+
+#         # Create conversations for the batch
+#         messages = [{"role": "user", "content": [
+#                         {"type": "image", "image": image}, 
+#                         {"type": "text", "text": getPrompt(batch_det_bboxes, det_classes, dataset_instructions_json)}
+#                         ]
+#                     }]
+        
+#         # Generate outputs with scores
+#         outputs = model_generate_with_scores(messages, qwen_model, qwen_processor, max_new_tokens=batch_size*100)
+
+#         predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i], dim=-1)) for i in range(len(outputs.scores))]
+#         print(f"[{i}] Predicted tokens: {predicted_tokens}")
+
+
+#         def getAnwserIndex(predicted_tokens):
+
+#             question_answer_map = {}
+
+#             current_question_idx = -1
+#             current_question = ''
+#             answer_index = -1
+#             answer = ''
+#             for idx, token in enumerate(predicted_tokens):
+#                 #Find question idx
+#                 if token.isdigit():
+#                     # current_question_idx = int(token)
+#                     current_question_idx = idx
+#                     current_question = f"Question-{token}"
+                
+#                 if token.lower() in ['yes', 'no'] and current_question_idx != -1:
+#                     answer = token
+#                     answer_index = idx
+
+                    
+#                     question_answer_map[current_question] = {
+#                         'answer': answer,
+#                         'answer_index': answer_index,
+#                         'question': current_question,
+#                         'question_idx': current_question_idx
+#                     }
+
+#                     #Reset for next question
+#                     current_question_idx = -1
+#                     current_question = ''
+#                     answer_index = -1
+#                     answer = ''
+
+#             return question_answer_map
+
+
+            
+
+#         question_answer_map = getAnwserIndex(predicted_tokens)
+#         print(f"[{i}] Found question_answer_map: {question_answer_map}")
+
+#         if len(question_answer_map) != len(batch_det_bboxes):
+#             print(f"\n\n******\n[{i}] Warning! Number of answers ({len(question_answer_map)}) does not match number of bboxes ({len(batch_det_bboxes)})!\n******\n\n")
+        
+
+#         for b, det in enumerate(batch_det_bboxes):
+#             qa_key = f"Question-{b}"
+#             if qa_key not in question_answer_map:
+#                 print(f"\n\n******\n[{i}] Warning! {qa_key} not found in question_answer_map!\n******\n\n")
+#                 all_final_scores.append(0.0)
+#                 continue
+
+#             answer_info = question_answer_map[qa_key]
+#             answer_index = answer_info['answer_index']
+
+#             # Calculate 'Yes' probability
+#             scores = outputs.scores[answer_index]
+#             probs = torch.nn.functional.softmax(scores, dim=-1)
+            
+            
+#             yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+#             score = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+#             all_final_scores.append(score.tolist()[0])
+
+    
+#     return np.array(all_final_scores)
+
+
+
+
+# def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
+#     """
+#     Scores a batch of images with bounding boxes based on a VQA prompt.
+#     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+#     """
+#     if not pil_images: return np.array([])
+    
+#     def getPrompt(prompt):
+#         # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
+#         question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
+#         return question
 
         
-    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-    no_token_id = qwen_processor.tokenizer.encode("No")[0]
+#     yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+#     no_token_id = qwen_processor.tokenizer.encode("No")[0]
     
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
+#     all_final_scores = []
+#     # Process images in batches
+#     for i in range(0, len(pil_images), batch_size):
+#         batch_pil_images = pil_images[i:i + batch_size]
+#         batch_prompts = prompt_list[i:i + batch_size]
         
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
+#         # Create conversations for the batch
+#         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
         
-        # Generate outputs with scores
-        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+#         # Generate outputs with scores
+#         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
 
-        # Calculate 'Yes' probability
-        scores = outputs.scores[0]
-        probs = torch.nn.functional.softmax(scores, dim=-1)
+#         # Calculate 'Yes' probability
+#         scores = outputs.scores[0]
+#         probs = torch.nn.functional.softmax(scores, dim=-1)
         
-        yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
-        batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
-        all_final_scores.extend(batch_scores.tolist())
+#         yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+#         batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+#         all_final_scores.extend(batch_scores.tolist())
     
-    return np.array(all_final_scores)
+#     return np.array(all_final_scores)
 
 
 
@@ -519,121 +615,121 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
 
 
 
-import string
-def getClsIndex(predicted_tokens, num_cls):
+# import string
+# def getClsIndex(predicted_tokens, num_cls):
 
-    #Check for col - which is a character - but we muct also include cases like '[A' which is a single token
-    cls_char = [f"{cls}" for cls in range(num_cls)]
+#     #Check for col - which is a character - but we muct also include cases like '[A' which is a single token
+#     cls_char = [f"{cls}" for cls in range(num_cls)]
 
-    cls_index = np.ones(len(predicted_tokens))
+#     cls_index = np.ones(len(predicted_tokens))
     
-    default_cls_idx = 1
+#     default_cls_idx = 1
     
-    #Direct Match
-    dir_cls_match = np.array([t in cls_char for t in predicted_tokens])
+#     #Direct Match
+#     dir_cls_match = np.array([t in cls_char for t in predicted_tokens])
     
-    found_cls = False
+#     found_cls = False
 
-    if np.any(dir_cls_match):
-        found_cls = True
-        cls_index = dir_cls_match
-
-
-    #Find any char or digit containing token
-    if not found_cls:
-        cls_index[np.where(np.array(predicted_tokens) == '<|im_end|>')] = 0
-
-        # digit_index = [np.any([c.isdigit() and c not in string.punctuation for c in s]) for s in predicted_tokens]
-        alpha_index = [np.any([c.isalpha() and c not in string.punctuation for c in s]) for s in predicted_tokens]
-
-        # cls_index = np.logical_and(cls_index, digit_index)
-        cls_index = np.logical_and(cls_index, alpha_index)
-
-        if np.any(cls_index):
-            found_cls = True
+#     if np.any(dir_cls_match):
+#         found_cls = True
+#         cls_index = dir_cls_match
 
 
-    #Handling default fallback
-    if not found_cls:
-        cls_index = np.ones(len(predicted_tokens))
-        cls_index[default_cls_idx] = 1
+#     #Find any char or digit containing token
+#     if not found_cls:
+#         cls_index[np.where(np.array(predicted_tokens) == '<|im_end|>')] = 0
+
+#         # digit_index = [np.any([c.isdigit() and c not in string.punctuation for c in s]) for s in predicted_tokens]
+#         alpha_index = [np.any([c.isalpha() and c not in string.punctuation for c in s]) for s in predicted_tokens]
+
+#         # cls_index = np.logical_and(cls_index, digit_index)
+#         cls_index = np.logical_and(cls_index, alpha_index)
+
+#         if np.any(cls_index):
+#             found_cls = True
 
 
-    return cls_index
+#     #Handling default fallback
+#     if not found_cls:
+#         cls_index = np.ones(len(predicted_tokens))
+#         cls_index[default_cls_idx] = 1
 
 
-def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, class_name_list: list, batch_size: int = 8):
-    """
-    Scores a batch of images with bounding boxes based on a VQA prompt.
-    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
-    """
-    if not pil_images: return np.array([])
+#     return cls_index
+
+
+# def get_masked_image_vqa_class_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, class_name_list: list, batch_size: int = 8):
+#     """
+#     Scores a batch of images with bounding boxes based on a VQA prompt.
+#     This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+#     """
+#     if not pil_images: return np.array([])
     
 
-    num_cls = len(class_name_list)
+#     num_cls = len(class_name_list)
 
-    def getPrompt(prompt):
+#     def getPrompt(prompt):
         
-        # class_options = [f"[{chr(ord('A') + i)}]: {c}" for i, c in enumerate(class_name_list)]
-        class_options = [f"${chr(ord('A') + i)}$: {c}" for i, c in enumerate(class_name_list)]
-        class_options_str = ", ".join(class_options)
-        # example_class_token = f"[{chr(ord('A'))}]"
-        example_class_token = f"${chr(ord('A'))}$"
+#         # class_options = [f"[{chr(ord('A') + i)}]: {c}" for i, c in enumerate(class_name_list)]
+#         class_options = [f"${chr(ord('A') + i)}$: {c}" for i, c in enumerate(class_name_list)]
+#         class_options_str = ", ".join(class_options)
+#         # example_class_token = f"[{chr(ord('A'))}]"
+#         example_class_token = f"${chr(ord('A'))}$"
         
-        # question = f"Identify which class the subject or object inside the red bounding box belongs to from the following options: {class_options_str}. Respond only with the class index letter. For example, if the class is {class_name_list[0]}, output {example_class_token}."
-        question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {class_options_str}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: {example_class_token}."
-        return question
+#         # question = f"Identify which class the subject or object inside the red bounding box belongs to from the following options: {class_options_str}. Respond only with the class index letter. For example, if the class is {class_name_list[0]}, output {example_class_token}."
+#         question = f"Give the class name index the subject or object located inside the red bounding box in the image better relates to from the following: {class_options_str}? Please only answer using the class name index number. Ex for class name: {class_name_list[0]}, output: {example_class_token}."
+#         return question
 
-    all_final_scores = []
-    # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
+#     all_final_scores = []
+#     # Process images in batches
+#     for i in range(0, len(pil_images), batch_size):
+#         batch_pil_images = pil_images[i:i + batch_size]
+#         batch_prompts = prompt_list[i:i + batch_size]
         
-        # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
+#         # Create conversations for the batch
+#         conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
  
 
-        # Generate outputs with scores
-        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor, max_new_tokens=5)
+#         # Generate outputs with scores
+#         outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor, max_new_tokens=5)
 
                 
-        for b in range(len(batch_pil_images)):
-            predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i][b], dim=-1)) for i in range(len(outputs.scores))]
-            print(f"[{b}] Predicted tokens: {predicted_tokens}")
+#         for b in range(len(batch_pil_images)):
+#             predicted_tokens = [qwen_processor.tokenizer.decode(torch.argmax(outputs.scores[i][b], dim=-1)) for i in range(len(outputs.scores))]
+#             print(f"[{b}] Predicted tokens: {predicted_tokens}")
     
-            cls_index = getClsIndex(predicted_tokens, num_cls)
-            print(f"[{b}] Found cls_index: {cls_index}")
+#             cls_index = getClsIndex(predicted_tokens, num_cls)
+#             print(f"[{b}] Found cls_index: {cls_index}")
             
-            # We take the mean for all found tokens 
-            cls_scores = torch.concat([outputs.scores[i][b].unsqueeze(0) for i in range(len(outputs.scores)) if cls_index[i] == 1], dim = 0).mean(dim = 0).unsqueeze(0)
+#             # We take the mean for all found tokens 
+#             cls_scores = torch.concat([outputs.scores[i][b].unsqueeze(0) for i in range(len(outputs.scores)) if cls_index[i] == 1], dim = 0).mean(dim = 0).unsqueeze(0)
             
-            # Get token IDs for 'A', 'B', 'C', etc.
-            cls_token_ids = [qwen_processor.tokenizer.encode(f"{chr(ord('A') + i)}")[0] for i in range(num_cls)]
-            print("[{b}] Cls-Tokens:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_ids)]))
+#             # Get token IDs for 'A', 'B', 'C', etc.
+#             cls_token_ids = [qwen_processor.tokenizer.encode(f"{chr(ord('A') + i)}")[0] for i in range(num_cls)]
+#             print("[{b}] Cls-Tokens:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_ids)]))
         
-            # Print the next predicted token 
-            predicted_cls_token = qwen_processor.tokenizer.decode(torch.argmax(cls_scores, dim=-1))
-            print("[{b}] Cls predicted token:", predicted_cls_token)
+#             # Print the next predicted token 
+#             predicted_cls_token = qwen_processor.tokenizer.decode(torch.argmax(cls_scores, dim=-1))
+#             print("[{b}] Cls predicted token:", predicted_cls_token)
             
-            cls_probs = torch.nn.functional.softmax(cls_scores, dim=-1)
+#             cls_probs = torch.nn.functional.softmax(cls_scores, dim=-1)
             
-            if len(cls_token_ids) != len(set(cls_token_ids)):
-                print(f"\n\n******\n[{b}] Error! Cls Token ids aren't unique: {np.unique(cls_token_ids, return_counts = True)}\n******\n\n")
+#             if len(cls_token_ids) != len(set(cls_token_ids)):
+#                 print(f"\n\n******\n[{b}] Error! Cls Token ids aren't unique: {np.unique(cls_token_ids, return_counts = True)}\n******\n\n")
 
-            cls_token_probs = [cls_probs[:, cls] for cls in cls_token_ids]
-            print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
+#             cls_token_probs = [cls_probs[:, cls] for cls in cls_token_ids]
+#             print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
 
-            #Normalize the col & row token probs - to avoid row/col domination
-            cls_token_probs = torch.tensor(cls_token_probs)
-            cls_token_probs = cls_token_probs/cls_token_probs.sum()
-            print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
+#             #Normalize the col & row token probs - to avoid row/col domination
+#             cls_token_probs = torch.tensor(cls_token_probs)
+#             cls_token_probs = cls_token_probs/cls_token_probs.sum()
+#             print("[{b}] Cls-Tokens Probs:" + str([f"Cls-{cls}: {t}" for cls, t in zip(range(num_cls), cls_token_probs)]))
 
-            all_final_scores.append({'cls_name': class_name_list[cls_token_probs.argmax()], 'cls_prob':cls_token_probs.max()})
+#             all_final_scores.append({'cls_name': class_name_list[cls_token_probs.argmax()], 'cls_prob':cls_token_probs.max()})
         
       
     
-    return all_final_scores
+#     return all_final_scores
 
 
 def calculate_iou(boxA_xywh, boxB_xywh):
@@ -889,9 +985,11 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     #     ]
     # ```
 
-    #For scaling the bbox coordinates later
-    input_height = inputs['image_grid_thw'][0][1]*14
-    input_width = inputs['image_grid_thw'][0][2]*14
+    # #For scaling the bbox coordinates later
+    # input_height = inputs['image_grid_thw'][0][1]*14
+    # input_width = inputs['image_grid_thw'][0][2]*14
+    input_height = 1000
+    input_width = 1000
 
     # return output_text
     return output_text, input_width, input_height

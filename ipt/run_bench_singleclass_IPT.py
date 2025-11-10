@@ -25,6 +25,8 @@ import run_bench_singleclass_evaluator as evaluator
 import ipt_utils as utils
 
 
+os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
+
 
 def get_seed_state():
     """Returns the current random seed state."""
