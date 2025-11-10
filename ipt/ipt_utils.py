@@ -209,9 +209,10 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
         }
         sampling_params = SamplingParams(
             temperature=0,
-            max_tokens=2048,
+            # max_tokens=2048,
+            max_tokens=max_new_tokens,
             top_k=-1,
-            logprobs=1,   # get top-5 logprobs per token
+            logprobs=5,   # get top-5 logprobs per token
             stop_token_ids=[],
         )
         outputs = model.generate(inputs, sampling_params = sampling_params)
