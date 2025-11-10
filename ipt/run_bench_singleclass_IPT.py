@@ -694,7 +694,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         
 
         #Check if initial definition with FP refinement already exists - then skip generation
-        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+        # init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
         if os.path.exists(init_def_path):
             print(f"Found existing initial definition for '{class_name}'. Loading from: {init_def_path}")
             with open(init_def_path, "r", encoding="utf-8") as f:
@@ -788,10 +789,10 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             
 
 
-        # Save the generated initial instructions as text file
-        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
-        with open(init_def_path, "w", encoding="utf-8") as f:
-            f.write(initial_instructions)
+            # Save the generated initial instructions as text file
+            init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
+            with open(init_def_path, "w", encoding="utf-8") as f:
+                f.write(initial_instructions)
 
 
         current_instructions = initial_instructions

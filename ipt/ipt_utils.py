@@ -63,13 +63,16 @@ def load_qwen_model(model_name):
     dtype = torch.bfloat8 if model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") else torch.bfloat16
     print(f"Loading using LLM class from vLLM with dtype: {dtype}")
 
+    enable_expert_parallel = True if (model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") or model_name.startswith("Qwen3-VL-30B-A3B-Instruct")) else False
+    print(f"enable_expert_parallel: {enable_expert_parallel}")
+
     model = LLM(
         model="Qwen/"+model_name,
         dtype=dtype,
         trust_remote_code=True,
         gpu_memory_utilization=0.80,
         enforce_eager=False,
-        enable_expert_parallel = True,
+        enable_expert_parallel = enable_expert_parallel,
         # max_model_len=700,
         tensor_parallel_size=torch.cuda.device_count(),
         seed=0
