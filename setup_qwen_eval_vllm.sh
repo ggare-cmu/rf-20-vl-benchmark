@@ -14,7 +14,7 @@
 # Exit immediately if a command fails
 set -e
 
-api_key=$1
+# api_key=$1
 
 echo "=== Creating conda environment ==="
 conda create -n qwen-fp8-env python=3.10 -y
@@ -28,6 +28,12 @@ echo "Active Conda environment: $CONDA_DEFAULT_ENV"
 
 echo "===installing vllm in fp8 env===="
 pip install vllm
+
+echo "=== Installing flashinfer ==="
+# pip install flashinfer --upgrade
+conda install -c conda-forge gcc=11 gxx=11 -y
+pip install flashinfer-python
+
 
 echo "=== Installing tqdm ==="
 conda install -y tqdm
