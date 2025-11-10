@@ -70,7 +70,8 @@ def load_qwen_model(model_name):
         model="Qwen/"+model_name,
         dtype=dtype,
         trust_remote_code=True,
-        gpu_memory_utilization=0.80,
+        # gpu_memory_utilization=0.80,
+        gpu_memory_utilization=0.90,
         enforce_eager=False,
         enable_expert_parallel = enable_expert_parallel,
         # max_model_len=700,
@@ -157,7 +158,7 @@ def model_generate(messages, model, processor):
     text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(messages)
     # inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
-    inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt")
+    inputs_org = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt")
 
     with torch.no_grad():
         # generated_ids = model.generate(**inputs, max_new_tokens=512)
@@ -186,24 +187,25 @@ def model_generate(messages, model, processor):
             output_text = output.outputs[0].text
 
         
-    return output_text, inputs
+    return output_text, inputs_org
 
 
 
 # def model_generate_with_scores(conversations, model, processor, max_new_tokens=2):
 def model_generate_with_scores(conversations, model, processor, max_new_tokens=1):
+# def model_generate_with_scores(conversations, model, processor, max_new_tokens=5):
     # conversations is a list of message lists
 
     # Prepare inputs for the model
     text_input = processor.apply_chat_template(conversations, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(conversations)
     # inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
-    inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt")
+    # inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt")
     
     with torch.no_grad():
         # generated_ids = model.generate(**inputs, max_new_tokens=512)
         # generated_ids = model.generate(**inputs, max_new_tokens=1024)
-        output_text = None
+        # output_text = None
         # if(model_name == "Qwen3-VL-2B-Instruct-FP8" or model_name == "Qwen3-VL-235B-A22B-Instruct-FP8"):
             
         mm_data = {}
@@ -214,6 +216,7 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
 
         inputs =  {
             'prompt': text_input,
+            # 'prompt': conversations,
             'multi_modal_data': mm_data,
         }
         sampling_params = SamplingParams(
@@ -221,6 +224,7 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
             # max_tokens=2048,
             max_tokens=max_new_tokens,
             top_k=-1,
+            # logprobs=max_new_tokens,   # get top-5 logprobs per token
             logprobs=5,   # get top-5 logprobs per token
             stop_token_ids=[],
         )
@@ -276,20 +280,20 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         return question
     
         
-    yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
-    no_token_id = qwen_processor.tokenizer.encode("No")[0]
+    # yes_token_id = qwen_processor.tokenizer.encode("Yes")[0]
+    # no_token_id = qwen_processor.tokenizer.encode("No")[0]
 
     all_final_scores = []
     # Process images in batches
-    for i in range(0, len(pil_images), batch_size):
-        batch_pil_images = pil_images[i:i + batch_size]
-        batch_prompts = prompt_list[i:i + batch_size]
+    for i in range(0, len(pil_images)):
+        img = pil_images[i]
+        prompt = prompt_list[i]
         
         # Create conversations for the batch
-        conversations = [[{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}] for img, prompt in zip(batch_pil_images, batch_prompts)]
+        messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}]
         
         # Generate outputs with scores
-        outputs = model_generate_with_scores(conversations, qwen_model, qwen_processor)
+        outputs = model_generate_with_scores(messages, qwen_model, qwen_processor)
 
         # # Calculate 'Yes' probability
         # scores = outputs.scores[0]
@@ -299,39 +303,73 @@ def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, da
         # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
         # all_final_scores.extend(batch_scores.tolist())
 
-        for output in outputs:
-            token_logprobs = output.outputs[0].logprobs  # list[dict]
+        # print(f"Len of outputs: {len(outputs)}; outputs: {outputs}")
+        # print(f"Len of outputs: {len(outputs)};")
+        assert len(outputs) == 1, "Error: Expected single output for single input."
 
-            # Initialize scores
-            yes_logprob = None
-            no_logprob = None
 
-            # Look through generated tokens and their top_logprobs
-            for token_info in token_logprobs:
-                top_logprobs = token_info["top_logprobs"]
-                if "Yes" in top_logprobs:
-                    yes_logprob = top_logprobs["Yes"]
-                if "No" in top_logprobs:
-                    no_logprob = top_logprobs["No"]
+        # for output in outputs:
+        #     # Access the generated tokens' logprobs
+        #     for completion_output in output.outputs:
+        #         # cumulative log probability of the entire generated sequence
+        #         cumulative_logprob = completion_output.cumulative_logprob
 
-            # If neither found, skip
-            if yes_logprob is None and no_logprob is None:
-                all_final_scores.append(-1.0)
-                continue
-            if yes_logprob is None:
-                no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
-                yes_prob = 1 - no_prob
-                score = yes_prob.item()
-                all_final_scores.append(score)
-                continue
+        #         # detailed logprobs for each token (a list of dictionaries)
+        #         token_logprobs = completion_output.logprobs
 
-            # Convert from logprobs to probabilities
-            yes_prob = torch.exp(torch.tensor(yes_logprob)) if yes_logprob is not None else torch.tensor(0.0)
+        #         for i, logprob_dict in enumerate(token_logprobs):
+        #             token_id = completion_output.token_ids[i]
+        #             # Each logprob_dict maps token IDs to their logprobs for that position
+        #             print(f"Token ID: {token_id}, Logprob: {logprob_dict.get(token_id)}")
+
+
+        # for output in outputs:
+        # token_logprobs = outputs.outputs[0].logprobs  # list[dict]
+        # token_logprobs = outputs[0].logprobs  # list[dict]
+        # token_logprobs = [v for v in outputs[0].outputs[0].logprobs[0].values()][0]  # list[dict]
+        token_logprobs = outputs[0].outputs[0].logprobs[0]  # list[dict]
+        # print(f"token_logprobs: {token_logprobs}")
+
+
+        # Initialize scores
+        yes_logprob = None
+        no_logprob = None
+
+        # Look through generated tokens and their top_logprobs
+        for token_id, token_info in token_logprobs.items():
+            # top_logprobs = token_info["top_logprobs"]
+            logprob = token_info.logprob
+            decoded_token = token_info.decoded_token
+            # print(f"Decoded token: {decoded_token}: logprob: {logprob}, token_id: {token_id}")
+
+            if "Yes" == decoded_token:
+                yes_logprob = logprob
+            if yes_logprob is None and "yes" == decoded_token:
+                yes_logprob = logprob
+
+            if "No" == decoded_token:
+                no_logprob = logprob
+            if no_logprob is None and "no" == decoded_token:
+                no_logprob = logprob
+
+        # If neither found, skip
+        if yes_logprob is None and no_logprob is None:
+            all_final_scores.append(-1.0)
+            continue
+        if yes_logprob is None:
             no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
+            yes_prob = 1 - no_prob
+            score = yes_prob.item()
+            all_final_scores.append(score)
+            continue
 
-            # Normalize to get P(Yes)
-            score = yes_prob / (yes_prob + no_prob + 1e-18)
-            all_final_scores.append(score.item())
+        # Convert from logprobs to probabilities
+        yes_prob = torch.exp(torch.tensor(yes_logprob)) if yes_logprob is not None else torch.tensor(0.0)
+        no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
+
+        # Normalize to get P(Yes)
+        score = yes_prob / (yes_prob + no_prob + 1e-18)
+        all_final_scores.append(score.item())
     
     return np.array(all_final_scores)
 
@@ -998,10 +1036,10 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     # ```
 
     # #For scaling the bbox coordinates later
-    # input_height = inputs['image_grid_thw'][0][1]*14
-    # input_width = inputs['image_grid_thw'][0][2]*14
-    input_height = 1000
-    input_width = 1000
+    input_height = inputs['image_grid_thw'][0][1]*14
+    input_width = inputs['image_grid_thw'][0][2]*14
+    # input_height = 1000
+    # input_width = 1000
 
     # return output_text
     return output_text, input_width, input_height
@@ -1417,7 +1455,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
                 det["score"] = vqa_dict[i]['cls_prob'].item()
             else:
                 det["vqa_score"] = vqa_scores[i]
-                det["score"] = vqa_scores[i]
+                det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
     else:
         # If not VQA-rescoring, the VQA-based lists are the same as original
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]

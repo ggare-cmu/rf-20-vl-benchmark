@@ -17,12 +17,12 @@ set -e
 # api_key=$1
 
 echo "=== Creating conda environment ==="
-conda create -n qwen-fp8-env python=3.10 -y
+conda create -n qwen-vllm-env python=3.10 -y
 
 echo "=== Activating environment ==="
 # Conda activate doesn't work directly in non-interactive shells unless you source it
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate qwen-fp8-env
+conda activate qwen-vllm-env
 echo "Active Conda environment: $CONDA_DEFAULT_ENV"
 
 
