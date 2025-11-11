@@ -841,7 +841,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
             # --- Step 2: Evaluate with the current prompt ---
-            run_name = f"ipt_iter_{i}"
+            # run_name = f"ipt_iter_{i}"
+            run_name = f"class_{class_name}_ipt_iter_{i}"
             
             # UI placeholders for live visualization
             
