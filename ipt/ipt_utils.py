@@ -67,6 +67,9 @@ def load_qwen_model(model_name):
     enable_expert_parallel = True if (model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") or model_name.startswith("Qwen3-VL-30B-A3B-Instruct")) else False
     print(f"enable_expert_parallel: {enable_expert_parallel}")
 
+    tensor_parallel_size = torch.cuda.device_count() - 1 if model_name.startswith("Qwen2.5-VL-7B") else torch.cuda.device_count()
+    print(f"tensor_parallel_size: {tensor_parallel_size}")
+
     model = LLM(
         model="Qwen/"+model_name,
         dtype=dtype,
@@ -76,7 +79,7 @@ def load_qwen_model(model_name):
         enforce_eager=False,
         enable_expert_parallel = enable_expert_parallel,
         # max_model_len=700,
-        tensor_parallel_size=torch.cuda.device_count(),
+        tensor_parallel_size=tensor_parallel_size,
         seed=0
     )
         
