@@ -47,7 +47,7 @@ DATASETS=(
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_DIR="$WORKDIR/$RESULTSDIR/logs_$TIMESTAMP"
 
-mkdir -p "$LOGDIR"
+mkdir -p "$LOG_DIR"
 echo "🗂 Logs directory: $LOG_DIR"
 
 
@@ -64,8 +64,8 @@ for dataset in "${DATASETS[@]}"; do
     
     # Run with live streaming + logging
     # 'stdbuf -oL' ensures line-buffered output for real-time viewing
-    stdbuf -oL -eL bash -c "$next_job" 2>&1 | tee "$LOGFILE"
-    # eval "$next_job" 2>&1 | tee "$LOGFILE"
+    stdbuf -oL -eL bash -c "$next_job" 2>&1 | tee "$LOG_FILE"
+    # eval "$next_job" 2>&1 | tee "$LOG_FILE"
 
     echo "-------------------------------------------"
     
