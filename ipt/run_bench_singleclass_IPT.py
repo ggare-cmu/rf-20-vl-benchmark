@@ -832,8 +832,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             continue
 
         for i in range(start_iteration, num_iterations):
-            
-            print(f"\n\n\n--- Iteration {i} for class '{class_name}' ---\n\n\n")
+
+            print(f"\n\n\n--- Iteration {i} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
 
             # stats_type = "vqa_with_nms"
             stats_type = "vqa_no_nms"
