@@ -19,26 +19,26 @@ CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda act
 
 
 DATASETS=(
+  "aerial-airport"
+  "dentalai"
+  "flir-camera-objects"
+  "gwhd2021"
+  "recode-waste"
+  "wildfire-smoke"
+  "x-ray-id"
+  "soda-bottles"
+  "wb-prova"
+  "actions"
   "aquarium-combined"
   "the-dreidel-project"
-  "paper-parts"
-  "x-ray-id"
-  "gwhd2021"
-  "aerial-airport"
-  "recode-waste"
-  "wb-prova"
-  "water-meter"
-  "dentalai"
-  "trail-camera"
-  "defect-detection"
-  "wildfire-smoke"
-  "actions"
-  "all-elements"
   "orionproducts"
+  "trail-camera"
   "new-defects-in-wood"
-  "soda-bottles"
-  "flir-camera-objects"
   "lacrosse-object-detection"
+  "defect-detection"
+  "all-elements"
+  "water-meter"
+  "paper-parts"
 )
 
 # Create logs directory
@@ -54,13 +54,15 @@ for dataset in "${DATASETS[@]}"; do
     echo "==========================================="
     echo "Running dataset: $dataset"
     echo "==========================================="
-    CMD="$CMD_TEMPLATE --dataset_path $dataset"
+    
+    next_job="$CMD_TEMPLATE --dataset_path $dataset"
     
     LOG_FILE="$LOG_DIR/${dataset}.log"
     echo "Logging to $LOG_FILE"
     
-    # Run command and log both stdout and stderr
-    eval "$CMD" > "$LOG_FILE" 2>&1
+
+    # Run with live output and logging
+    eval "$next_job" 2>&1 | tee "$LOGFILE"
     
     echo "Finished: $dataset"
     echo
