@@ -42,7 +42,13 @@ DATASETS=(
 )
 
 # Create logs directory
-mkdir -p logs
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_DIR="$WORKDIR/$RESULTSDIR/logs_$TIMESTAMP"
+
+mkdir -p $LOG_DIR
+echo "🗂 Logs directory: $LOG_DIR"
+
 
 for dataset in "${DATASETS[@]}"; do
     echo "==========================================="
@@ -50,7 +56,7 @@ for dataset in "${DATASETS[@]}"; do
     echo "==========================================="
     CMD="$CMD_TEMPLATE --dataset_path $dataset"
     
-    LOG_FILE="logs/${dataset}.log"
+    LOG_FILE="$LOG_DIR/${dataset}.log"
     echo "Logging to $LOG_FILE"
     
     # Run command and log both stdout and stderr
