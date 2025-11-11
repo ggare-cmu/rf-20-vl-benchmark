@@ -15,7 +15,8 @@ MODEL_NAME="Qwen2.5-VL-72B-Instruct"
 
 # CMD_TEMPLATE="python ipt/run_bench_singleclass_IPT.py --model_name Qwen3-VL-235B-A22B-Instruct-FP8 --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT/Qwen3-VL-235B-A22B-Instruct-FP8/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1"
 RESULTSDIR="results/rf100vl_IPT/$MODEL_NAME/rf20_IPT_singleclass_vqaScore_withNMS"
-CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate qwen-vllm-env && python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
+CMD_TEMPLATE="python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
+# CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate qwen-vllm-env && python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 
 
 DATASETS=(
@@ -46,7 +47,7 @@ DATASETS=(
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_DIR="$WORKDIR/$RESULTSDIR/logs_$TIMESTAMP"
 
-mkdir -p $LOG_DIR
+mkdir -p "$LOGDIR"
 echo "🗂 Logs directory: $LOG_DIR"
 
 
@@ -56,13 +57,18 @@ for dataset in "${DATASETS[@]}"; do
     echo "==========================================="
     
     next_job="$CMD_TEMPLATE --dataset_path $dataset"
-    
+    echo "Executing command: $next_job"
+
     LOG_FILE="$LOG_DIR/${dataset}.log"
     echo "Logging to $LOG_FILE"
     
+    # Run with live streaming + logging
+    # 'stdbuf -oL' ensures line-buffered output for real-time viewing
+    stdbuf -oL -eL bash -c "$next_job" 2>&1 | tee "$LOGFILE"
+    # eval "$next_job" 2>&1 | tee "$LOGFILE"
 
-    # Run with live output and logging
-    eval "$next_job" 2>&1 | tee "$LOGFILE"
+    echo "-------------------------------------------"
+    
     
     echo "Finished: $dataset"
     echo
