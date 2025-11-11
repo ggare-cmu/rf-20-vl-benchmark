@@ -31,7 +31,7 @@ pip install vllm
 
 echo "=== Installing flashinfer ==="
 # pip install flashinfer --upgrade
-conda install -c conda-forge gcc=11 gxx=11 -y
+# conda install -c conda-forge gcc=11 gxx=11 -y
 pip install flashinfer-python
 
 
