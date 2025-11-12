@@ -1324,7 +1324,26 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     set_seed(args.seed)
 
     original_image = Image.open(image_path).convert("RGB")
-
+    #Check image size
+    width, height = original_image.size
+    print(f"Original image size: {width}x{height}")
+    # "height": 1440, "width": 2560, 
+    # "height": 1396, "width": 2880
+    # "height": 1832, "width": 3360, 
+    # "height": 1746, "width": 3114,
+    # "height": 4800, "width": 6400,
+    #Resize if too large
+    # max_dimension = (1920, 1080)
+    max_dimension = (2880, 1620)
+    # max_dimension = (3840, 2160)
+    if width > max_dimension[0] or height > max_dimension[1]:
+        print(f"Resizing image from {width}x{height} to fit within {max_dimension[0]}x{max_dimension[1]}")
+        original_image = original_image.resize(
+            max_dimension,
+            Image.Resampling.LANCZOS
+        )
+        width, height = original_image.size
+        print(f"Resized image size: {width}x{height}")
 
     raw_output = ""
     parsed_bboxes = []
