@@ -1325,6 +1325,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
     original_image = Image.open(image_path).convert("RGB")
     #Check image size
+    or_width, or_height = original_image.size
     width, height = original_image.size
     print(f"Original image size: {width}x{height}")
     # "height": 1440, "width": 2560, 
@@ -1442,17 +1443,17 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
         # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
         # image = Image.open(image_path).convert("RGB")
-        width, height = original_image.size
+        # width, height = original_image.size
         for det in parsed_bboxes_i:
             bbox = det["bbox"]
             x, y, bw, bh = bbox
             x1, y1, x2, y2 = x, y, x + bw, y + bh
             
             # Convert normalized coordinates to absolute coordinates
-            abs_y1 = int(y1/input_height * height)
-            abs_x1 = int(x1/input_width * width)
-            abs_y2 = int(y2/input_height * height)
-            abs_x2 = int(x2/input_width * width)    
+            abs_y1 = int(y1/input_height * or_height)
+            abs_x1 = int(x1/input_width * or_width)
+            abs_y2 = int(y2/input_height * or_height)
+            abs_x2 = int(x2/input_width * or_width)    
 
             abs_w = abs_x2 - abs_x1
             abs_h = abs_y2 - abs_y1
