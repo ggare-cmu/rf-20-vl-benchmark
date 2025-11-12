@@ -1356,20 +1356,58 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
         set_seed(args.seed)
         
-        # raw_output_i = run_qwen_inference(
-        raw_output_i, input_width, input_height = run_qwen_inference(
-            args,
-            model, processor,
-            # image_path=image_path,
-            image=original_image,
-            dataset_instructions=dataset_instructions,
-            class_name=class_name,
-            # class_name_list=class_name_list,
-            no_instructions=no_instructions,
-            # few_shot_examples=
-            few_shot_examples=few_shot_examples_for_cat_i
-        )
+        try:
+            # raw_output_i = run_qwen_inference(
+            raw_output_i, input_width, input_height = run_qwen_inference(
+                args,
+                model, processor,
+                # image_path=image_path,
+                image=original_image,
+                dataset_instructions=dataset_instructions,
+                class_name=class_name,
+                # class_name_list=class_name_list,
+                no_instructions=no_instructions,
+                # few_shot_examples=
+                few_shot_examples=few_shot_examples_for_cat_i
+            )
 
+        except torch.cuda.OutOfMemoryError as e:
+            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
+
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            # max_dimension = (1920, 1080)
+            resized_image = original_image.resize(
+                # (width // 2, height // 2),
+                (1920, 1080),
+                Image.Resampling.LANCZOS
+            )
+
+            try:
+                # Retry inference with downsized image
+                raw_output_i, input_width, input_height = run_qwen_inference(
+                    args,
+                    model, processor,
+                    image=resized_image,
+                    dataset_instructions=dataset_instructions,
+                    class_name=class_name,
+                    no_instructions=no_instructions,
+                    few_shot_examples=few_shot_examples_for_cat_i
+                )
+                print("✅ Retry succeeded with downsized image.")
+
+            except torch.cuda.OutOfMemoryError:
+                print("❌ Still OOM after downsizing. Skipping this image.")
+                torch.cuda.empty_cache()
+                raw_output_i, input_width, input_height = '', None, None
+
+        except Exception as e:
+            print(f"❌ Unexpected error during inference: {e}")
+            raw_output_i, input_width, input_height = '', None, None
+        
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
         #For Qwen3-VL, Qwen3-VL's default coordinate system has been changed from the absolute coordinates used in Qwen2.5-VL to relative coordinates ranging from 0 to 1000. (You don't need to calculate the resized_w)
@@ -1380,8 +1418,8 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             assert args.model_name.startswith("Qwen3-VL")
 
         # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
-        image = Image.open(image_path).convert("RGB")
-        width, height = image.size
+        # image = Image.open(image_path).convert("RGB")
+        width, height = original_image.size
         for det in parsed_bboxes_i:
             bbox = det["bbox"]
             x, y, bw, bh = bbox
@@ -1422,26 +1460,69 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # vqa_prompt = parsed_bboxes[0]["category_name"]
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
-        # vqa_scores = get_masked_image_vqa_scores(
-        #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
-        # )
-        if args.class_rescore:
-            vqa_dict = get_masked_image_vqa_class_scores(
-                model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
-            )
-        else:
+        try:
             # vqa_scores = get_masked_image_vqa_scores(
-            #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
             # )
-            vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            )
-            # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
-            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
-            # )
-            # vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
-            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
-            # )
+            if args.class_rescore:
+                vqa_dict = get_masked_image_vqa_class_scores(
+                    model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
+                )
+            else:
+                # vqa_scores = get_masked_image_vqa_scores(
+                #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                # )
+                vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                    model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                )
+                # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
+                #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+                # )
+                # vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
+                #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+                # )
+
+        except torch.cuda.OutOfMemoryError as e:
+            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
+
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            # max_dimension = (1920, 1080)
+            vqa_images_small = []
+            for img in vqa_images:
+                img_width, img_height = img.size
+                if img_width > 1920 or img_height > 1080:
+                    img.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
+                vqa_images_small.append(img)
+            vqa_images = vqa_images_small
+
+
+            try:
+                # Retry inference with downsized image
+                if args.class_rescore:
+                    vqa_dict = get_masked_image_vqa_class_scores(
+                        model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
+                    )
+                else:
+                    # vqa_scores = get_masked_image_vqa_scores(
+                    #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                    # )
+                    vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                    )
+                print("✅ Retry succeeded with downsized image.")
+
+            except torch.cuda.OutOfMemoryError:
+                print("❌ Still OOM after downsizing. Skipping this image.")
+                torch.cuda.empty_cache()
+                vqa_scores = [-1] * len(parsed_bboxes)
+
+        except Exception as e:
+            print(f"❌ Unexpected error during inference: {e}")
+            vqa_scores = [-1] * len(parsed_bboxes)
         
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
 
