@@ -757,6 +757,13 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 
                 other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
 
+
+                #Resize the image if too large
+                max_dimension = (1920, 1080)  # Example max dimensions (width, height)
+                other_img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
+                print(f"file_{os.path.basename(other_img_info['file_name'])} resized img.size: {other_img_with_boxes.size}")
+                
+
                 other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
                 #Save image
                 other_img_with_boxes.save(other_img_viz_path)
