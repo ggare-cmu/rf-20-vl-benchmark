@@ -1160,6 +1160,10 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                 continue
 
             label = item.get("label", "unknown")
+            
+            if not isinstance(label, str):
+                label = str(label) # Convert to string if not already
+
             if label == "unknown":
                 print(f"Skipping item (label is unknown): {item}")
                 reason = "Skipping item (label is unknown)"

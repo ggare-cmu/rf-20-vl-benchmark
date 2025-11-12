@@ -225,7 +225,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
     
     # Convert numpy arrays to lists for JSON serialization
     serializable_stats = {
-        eval_type: stats.tolist() for eval_type, stats in all_stats.items()
+        # eval_type: stats.tolist() for eval_type, stats in all_stats.items()
+        eval_type: stats.tolist() if hasattr(stats, "tolist") else stats for eval_type, stats in all_stats.items()
     }
 
     with open(eval_results_path, "w", encoding="utf-8") as f:
