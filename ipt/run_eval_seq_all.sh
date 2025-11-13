@@ -5,18 +5,19 @@ set -e  # Exit if any command fails
 WORKDIR=$(pwd)
 
 
-MODEL_NAME="Qwen2.5-VL-7B-Instruct" #Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct
+# MODEL_NAME="Qwen2.5-VL-7B-Instruct" #Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct
 # MODEL_NAME="Qwen2.5-VL-72B-Instruct"
 # MODEL_NAME="Qwen3-VL-8B-Instruct"
-# MODEL_NAME="Qwen3-VL-30B-A3B-Instruct"
+MODEL_NAME="Qwen3-VL-30B-A3B-Instruct"
 # MODEL_NAME="Qwen3-VL-235B-A22B-Instruct"
 # MODEL_NAME="Qwen3-VL-235B-A22B-Instruct-FP8"
 
 
 # CMD_TEMPLATE="python ipt/run_bench_singleclass_IPT.py --model_name Qwen3-VL-235B-A22B-Instruct-FP8 --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT/Qwen3-VL-235B-A22B-Instruct-FP8/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1"
 # DATA_INSTR_PATH="./data_instr/default/README.dataset"
-DATA_INSTR_PATH="./results/completed_exp/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/iterative_prompt_refinement/all_refined_class_instructions"
-RESULTSDIR="results/rf100vl_IPT_ablations/$MODEL_NAME/rf20_IPT_singleclass_vqaScore_withNMS_withQwen30BDataInstr"
+# DATA_INSTR_PATH="./results/completed_exp/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/iterative_prompt_refinement/all_refined_class_instructions"
+DATA_INSTR_PATH="./results/completed_exp/rf100vl_IPT/Qwen2.5-VL-7B-Instruct/iterative_prompt_refinement/all_refined_class_instructions"
+RESULTSDIR="results/rf100vl_IPT_ablations/$MODEL_NAME/rf20_IPT_singleclass_vqaScore_withNMS_withQwen2-7BDataInstr"
 CMD_TEMPLATE="python ipt/run_bench_singleclass_evaluator.py --model_name $MODEL_NAME --vqa_rescore --apply_nms --nms_threshold 0.5 --data_instr_path $DATA_INSTR_PATH --output_dir $RESULTSDIR --vqa_batch_size 1"
 # CMD_TEMPLATE="python ipt/run_bench_singleclass_evaluator.py --model_name $MODEL_NAME --data_instr_path $DATA_INSTR_PATH --output_dir $RESULTSDIR --vqa_batch_size 1"
 # CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate qwen-vllm-env && python ipt/run_bench_singleclass_IPT.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
