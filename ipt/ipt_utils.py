@@ -21,6 +21,7 @@ from pycocotools.cocoeval import COCOeval
 
 
 from PIL import Image, ImageDraw
+import io
 
 import json
 import time
@@ -30,6 +31,32 @@ import numpy as np
 
 import random
 
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.shared_eval_utils import RateLimiter
+
+from google import genai
+
+
+from utils.shared_eval_utils import is_rate_limit_error
+from google.genai import types
+from google.genai.types import Content, Part
+MAX_WORKERS = 16
+REQUEST_LIMIT = 9000
+MAX_RETRIES = 3
+RETRY_DELAY_BASE = 8
+RETRY_DELAY_MAX = 60
+
+#export GOOGLE_API_KEY='your_api_key_here'
+# API_KEY = os.getenv('GOOGLE_API_KEY')
+# API_KEY = os.getenv('GEMINI_API_KEY')
+
+safety_settings = [
+    types.SafetySetting(
+        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold="BLOCK_ONLY_HIGH",
+    ),
+]
 
 
 
@@ -40,6 +67,25 @@ def set_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+
+
+def load_gemini_model(model_name = "gemini-2.5-pro-preview-03-25"):
+    # parser.add_argument('--model_id', type=str, default= "gemini-2.5-pro-preview-03-25", help='The Gemini model ID to use for inference')
+    
+
+    API_KEY = os.getenv('GOOGLE_API_KEY')
+    # API_KEY = os.getenv('GEMINI_API_KEY')
+
+    print(f"Using GOOGLE_API_KEY: {API_KEY is not None}")
+
+
+    client = genai.Client(api_key=API_KEY)
+
+    rate_limiter = RateLimiter(REQUEST_LIMIT)
+
+    return client, rate_limiter
 
 
 def load_qwen_model(model_name):
@@ -158,7 +204,116 @@ def load_qwen_model(model_name):
 
 
 
+# def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter, client):
+# def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter, client):
 def model_generate(messages, model, processor):
+    """
+    Run inference with retry logic for rate limits, accepting the full 'contents' list.
+
+    Args:
+        contents (list[Content]): The list of Content objects for the API call.
+        system_prompt (str): The system instruction for the model.
+        model_id (str): The ID of the Gemini model to use.
+
+    Returns:
+        tuple[str | None, str | None]: (response_text, error_message)
+                                       response_text is None if an error occurred.
+                                       error_message is None if successful.
+    """
+
+    client = model
+    rate_limiter = processor
+
+    # basic_system_prompt = "Return bounding boxes as a JSON array with labels. Never return masks or code fencing."
+    basic_system_prompt = "You are a helpful assistant specialized in image analysis, object detection, and object identification."
+    model_id= "gemini-2.5-pro-preview-03-25" #model_name
+
+    
+    gemini_messages = []
+    for message in messages:
+
+        parts_list = []
+        for part in message['content']:
+            if part['type'] == 'text':
+                # text_part_for_example = types.TextPart(text=part['text'])
+                text_part_for_example = Part(text=part['text'])
+                parts_list.append(text_part_for_example)
+            elif part['type'] == 'image':
+                # image_part = types.ImagePart(image=part['image'])
+                # image_part = Part.from_bytes(data=part['image'], mime_type="image/jpeg")
+
+                img = part['image']
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG")
+                image_bytes = buffer.getvalue()
+
+                image_part = Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                parts_list.append(image_part)
+    
+        # Create Content object for the message
+        # message_content = types.Content(role=message['role'], parts=parts_list)
+        message_content = Content(role=message['role'], parts=parts_list)
+        gemini_messages.append(message_content)
+    
+    # print(f"Original messages: {messages}")
+    # print(f"gemini_messages: {gemini_messages}")
+
+    retries = 0
+
+    while retries <= MAX_RETRIES:
+        try:
+            rate_limiter()
+            response = client.models.generate_content(
+                model=model_id,
+                # contents=contents,
+                # contents=messages,
+                contents=gemini_messages,
+                config=types.GenerateContentConfig(
+                    # system_instruction=system_prompt,
+                    system_instruction=basic_system_prompt,
+                    temperature=0.0,
+                    safety_settings=safety_settings,
+                    max_output_tokens=8192,
+                ),
+            )
+
+            response_text = getattr(response, 'text', None)
+            if response_text is None:
+                 print(f"Warning! API response for model {model_id} did not contain a 'text' attribute.")
+                 try:
+                      if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                           response_text = response.candidates[0].content.parts[0].text
+                           print("Recovered response text from candidate parts.")
+                 except Exception as e:
+                      print(f"Error! Could not extract text from response parts: {e}. Returning empty.")
+                      response_text = ""
+
+            return response_text, None
+
+        except Exception as e:
+            error_msg = str(e)
+            retries += 1
+
+            error_type = "rate limit" if is_rate_limit_error(error_msg) else "API"
+
+            if retries > MAX_RETRIES:
+                error_detail = f"{error_type.capitalize()} error exceeded after {MAX_RETRIES} retries: {error_msg}"
+                print(f"Warning! {error_detail[:500]}...")
+                # return None, error_detail
+                return '', error_detail
+
+            delay = min(RETRY_DELAY_MAX, RETRY_DELAY_BASE * (2 ** (retries - 1)))
+            jitter = random.uniform(0, 0.1 * delay)
+            wait_time = delay + jitter
+
+            print(f"{error_type.capitalize()} error encountered. Retry {retries}/{MAX_RETRIES} after {wait_time:.2f}s. Details: {error_msg[:400]}...")
+            time.sleep(wait_time)
+
+    # return None, "Maximum retries exceeded without specific error capture (logic error)"
+    return '', "Maximum retries exceeded without specific error capture (logic error)"
+
+
+def model_generate_qwen(messages, model, processor):
     text_input = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     image_inputs, _ = process_vision_info(messages)
     # inputs = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt").to(model.device)
@@ -888,7 +1043,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
 
                         # Step 4: Include even small objects (tiny bounding boxes)
                         detections.append({{
-                            "bbox_2d": bbox,
+                            "box_2d": bbox,  #The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000.
                             "label": class_name,
                             "score": calibrated_score
                         }})
@@ -934,7 +1089,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
 
                         # Step 4: Include even small objects (tiny bounding boxes)
                         detections.append({{
-                            "bbox_2d": bbox,
+                            "box_2d": bbox, #The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000.
                             "label": class_name,
                             "score": calibrated_score
                         }})
@@ -1029,7 +1184,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
         ]
        
 
-    output_text, inputs = model_generate(messages, model, processor)
+    output_text, _ = model_generate(messages, model, processor)
 
 
     #Sample
@@ -1040,10 +1195,10 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     # ```
 
     # #For scaling the bbox coordinates later
-    input_height = inputs['image_grid_thw'][0][1]*14
-    input_width = inputs['image_grid_thw'][0][2]*14
-    # input_height = 1000
-    # input_width = 1000
+    # input_height = inputs['image_grid_thw'][0][1]*14
+    # input_width = inputs['image_grid_thw'][0][2]*14
+    input_height = 1000
+    input_width = 1000
 
     # return output_text
     return output_text, input_width, input_height
@@ -1054,12 +1209,12 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
     Robust parser for a Qwen output that looks like:
     ```json
     [
-      {"bbox_2d": [x1, y1, x2, y2], "score": 0.95, "label": "some_label"},
+      {"box_2d": [x1, y1, x2, y2], "score": 0.95, "label": "some_label"},
       ...
     ]
     ```
     1) Removes code fences.
-    2) Fixes missing colons in `bbox_2d [...]`.
+    2) Fixes missing colons in `box_2d [...]`.
     3) Parses the entire string as JSON (expecting a top-level list).
     4) If JSON parsing fails (e.g. due to truncation), it falls back to extracting individual JSON objects.
     5) Iterates each item; if one is malformed, it is skipped. Others are still accepted.
@@ -1081,10 +1236,10 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
             }
             f.write(json.dumps(log_entry) + "\n")
 
-    # Remove code fences and fix bbox_2d formatting
+    # Remove code fences and fix box_2d formatting
     text_clean = re.sub(r'```(?:json)?\s*', '', output_text)
     text_clean = text_clean.replace('```', '')
-    text_clean = re.sub(r'"bbox_2d\s*\[(.*?)\]', r'"bbox_2d":[\1]', text_clean)
+    text_clean = re.sub(r'"box_2d\s*\[(.*?)\]', r'"box_2d":[\1]', text_clean)
 
     detections = []
     data = []
@@ -1126,7 +1281,8 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                 log_skipped(reason, item, output_text)
                 continue
 
-            bbox_2d = item.get("bbox_2d", [])
+            # bbox_2d = item.get("bbox_2d", [])
+            bbox_2d = item.get("box_2d", item.get("bbox", item.get("bounding_box", item.get("bounding_box_2d", item.get("bbox_2d", None)))))
             if len(bbox_2d) != 4:
                 print(f"Skipping invalid bbox_2d length: {bbox_2d}")
                 reason = "Skipping invalid bbox_2d length"
@@ -1160,6 +1316,10 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                 continue
 
             label = item.get("label", "unknown")
+            
+            if not isinstance(label, str):
+                label = str(label) # Convert to string if not already
+
             if label == "unknown":
                 print(f"Skipping item (label is unknown): {item}")
                 reason = "Skipping item (label is unknown)"
@@ -1190,11 +1350,16 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                     
             score = float(item.get("score", -1.0))
             if score == -1.0:
-                print(f"Skipping item (score is -1.0): {item}")
-                reason = "Skipping item (score is -1.0)"
+                # print(f"Skipping item (score is -1.0): {item}")
+                # reason = "Skipping item (score is -1.0)"
+                # print(f"{reason}: {item}")
+                # log_skipped(reason, item, output_text)
+                # continue
+                score = 0.5  # Assign default score and continue
+                print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
+                reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
                 print(f"{reason}: {item}")
                 log_skipped(reason, item, output_text)
-                continue
 
             detections.append({
                 "bbox": [x1, y1, w, h],
@@ -1356,57 +1521,20 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
         set_seed(args.seed)
         
-        try:
-            # raw_output_i = run_qwen_inference(
-            raw_output_i, input_width, input_height = run_qwen_inference(
-                args,
-                model, processor,
-                # image_path=image_path,
-                image=original_image,
-                dataset_instructions=dataset_instructions,
-                class_name=class_name,
-                # class_name_list=class_name_list,
-                no_instructions=no_instructions,
-                # few_shot_examples=
-                few_shot_examples=few_shot_examples_for_cat_i
-            )
-
-        except torch.cuda.OutOfMemoryError as e:
-            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
-
-            # Free up GPU memory
-            torch.cuda.empty_cache()
-
-            # Downsize image by 50% (you can adjust this factor)
-            width, height = original_image.size
-            # max_dimension = (1920, 1080)
-            resized_image = original_image.resize(
-                # (width // 2, height // 2),
-                (1920, 1080),
-                Image.Resampling.LANCZOS
-            )
-
-            try:
-                # Retry inference with downsized image
-                raw_output_i, input_width, input_height = run_qwen_inference(
-                    args,
-                    model, processor,
-                    image=resized_image,
-                    dataset_instructions=dataset_instructions,
-                    class_name=class_name,
-                    no_instructions=no_instructions,
-                    few_shot_examples=few_shot_examples_for_cat_i
-                )
-                print("✅ Retry succeeded with downsized image.")
-
-            except torch.cuda.OutOfMemoryError:
-                print("❌ Still OOM after downsizing. Skipping this image.")
-                torch.cuda.empty_cache()
-                raw_output_i, input_width, input_height = '', None, None
-
-        except Exception as e:
-            print(f"❌ Unexpected error during inference: {e}")
-            raw_output_i, input_width, input_height = '', None, None
+        
+        # raw_output_i = run_qwen_inference(
+        raw_output_i, input_width, input_height = run_qwen_inference(
+            args,
+            model, processor,
+            # image_path=image_path,
+            image=original_image,
+            dataset_instructions=dataset_instructions,
+            class_name=class_name,
+            # class_name_list=class_name_list,
+            no_instructions=no_instructions,
+            # few_shot_examples=
+            few_shot_examples=few_shot_examples_for_cat_i
+        )
         
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
@@ -1415,7 +1543,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         if not args.model_name.startswith("Qwen2.5-VL"):
             input_height = 1000
             input_width = 1000
-            assert args.model_name.startswith("Qwen3-VL")
+            assert args.model_name.startswith("Qwen3-VL") or args.model_name.startswith("gemini")
 
         # Convert normalized coordinates to absolute coordinates - Ref-fix: https://github.com/QwenLM/Qwen3-VL/blob/2f25a646fb0f329647428eb8dacf19293de6f5d4/cookbooks/spatial_understanding.ipynb
         # image = Image.open(image_path).convert("RGB")

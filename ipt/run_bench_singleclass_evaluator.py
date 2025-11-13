@@ -225,7 +225,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
     
     # Convert numpy arrays to lists for JSON serialization
     serializable_stats = {
-        eval_type: stats.tolist() for eval_type, stats in all_stats.items()
+        # eval_type: stats.tolist() for eval_type, stats in all_stats.items()
+        eval_type: stats.tolist() if hasattr(stats, "tolist") else stats for eval_type, stats in all_stats.items()
     }
 
     with open(eval_results_path, "w", encoding="utf-8") as f:
@@ -274,7 +275,8 @@ def run_single_dataset_evaluation(args):
 
     print(f"Using model: {args.model_name}")
 
-    model, processor = utils.load_qwen_model(args.model_name)
+    # model, processor = utils.load_qwen_model(args.model_name)
+    model, processor = utils.load_gemini_model(args.model_name)
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
