@@ -927,6 +927,12 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
         )
     else:
         
+        # #Baseline-Prompt: Default with instructions 
+        # prompt_text = (
+        #     f"Locate all of the following objects: {class_name} in the image and output the coordinates in JSON format.\n\nUse the following annotator instructions to improve detection accuracy:\n{dataset_instructions}\n\nReturn a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}."
+
+        # )
+        
         prompt_text = (
         f"""
             Follow the steps outlined in the pseudo code below on this image for object detection. Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
