@@ -1194,11 +1194,16 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                     
             score = float(item.get("score", -1.0))
             if score == -1.0:
-                print(f"Skipping item (score is -1.0): {item}")
-                reason = "Skipping item (score is -1.0)"
+                # print(f"Skipping item (score is -1.0): {item}")
+                # reason = "Skipping item (score is -1.0)"
+                # print(f"{reason}: {item}")
+                # log_skipped(reason, item, output_text)
+                # continue
+                score = 0.5  # Assign default score and continue
+                print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
+                reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
                 print(f"{reason}: {item}")
                 log_skipped(reason, item, output_text)
-                continue
 
             detections.append({
                 "bbox": [x1, y1, w, h],
