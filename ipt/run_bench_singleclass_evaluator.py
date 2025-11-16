@@ -27,7 +27,8 @@ import ipt_utils as utils
 
 
 
-def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, run_name="", output_dir="results", max_samples=None):
+def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, 
+                     run_name="", output_dir="results", max_samples=None, sigclip_pipe=None):
     test_dir = os.path.join(dataset_path, "test")
     ann_path = os.path.join(test_dir, "_annotations.coco.json")
     # readme_path = os.path.join(dataset_path, "README.dataset.txt")
@@ -157,7 +158,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     class_name_list=ds_cat_names, #GRG: Pass the entire list of category names
                     no_instructions=no_instructions,
                     few_shot_dict=few_shot_dict,
-                    output_dir=output_dir
+                    output_dir=output_dir,
+                    sigclip_pipe=sigclip_pipe,
                 )
 
                 for eval_type, detections in all_detections.items():
@@ -277,10 +279,17 @@ def run_single_dataset_evaluation(args):
 
     model, processor = utils.load_qwen_model(args.model_name)
 
+    if args.siglip_rescore:
+        sigclip_pipe = utils.load_sigclip_pipeline()
+        print("Loaded SigClip pipeline for confidence scoring.")
+
+
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
 
-    eval_generator = evaluate_dataset(args, model, processor, dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, run_name=run_name, output_dir=args.output_dir)
+    eval_generator = evaluate_dataset(args, model, processor, dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, 
+                                      run_name=run_name, output_dir=args.output_dir,
+                                      sigclip_pipe=sigclip_pipe if args.siglip_rescore else None)
 
 
     # Collect live results yielded by the generator and save them to disk periodically
@@ -406,6 +415,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument("--vqa_rescore", action="store_true", help="Use VQA-based re-scoring of candidate masks")
+    parser.add_argument("--siglip_rescore", action="store_true", help="Use SigLip-based re-scoring of candidate masks")
     parser.add_argument("--apply_nms", action="store_true", help="Apply Non-Maximum Suppression to detections.")
     parser.add_argument("--nms_threshold", type=float, default=0.5, help="IoU threshold for Non-Maximum Suppression.")
     parser.add_argument("--class_rescore", action="store_true", help="Use VQA-based class re-scoring of candidate masks")

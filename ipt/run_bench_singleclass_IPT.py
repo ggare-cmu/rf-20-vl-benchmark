@@ -52,7 +52,7 @@ def set_seed_from_state(seed_state):
 def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, run_name="", output_dir="results", 
                      eval_class_name=None, eval_cat_id=None, 
                      max_samples=None, 
-                     dataset_instructions_override_json=None, coco_override=None):
+                     dataset_instructions_override_json=None, coco_override=None, sigclip_pipe=None):
     train_dir = os.path.join(dataset_path, "train")
     ann_path = os.path.join(train_dir, "_annotations.coco.json")
     # # readme_path = os.path.join(dataset_path, "README.roboflow.txt")
@@ -168,6 +168,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     few_shot_dict=few_shot_dict,
                     output_dir=output_dir,
                     # eval_class_name=eval_class_name,
+                    sigclip_pipe=sigclip_pipe,
                 )
 
                 for eval_type, detections in all_detections.items():
@@ -488,7 +489,7 @@ def extract_class_definition(response, class_name):
 
 
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
-                                    num_samples=None):
+                                    num_samples=None, sigclip_pipe=None):
     
     """
     Performs iterative prompt refinement.
@@ -877,7 +878,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
                 # max_samples=None  # Evaluate on the full dataset to get proper metrics
                 # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
-                coco_override=coco_gt if num_samples is not None else None # Pass the coco_gt with limited samples if applicable
+                coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
+                sigclip_pipe=sigclip_pipe
             )
 
             #Restore seed state
@@ -1322,6 +1324,10 @@ def run_single_dataset_evaluation(args):
 
     model, processor = utils.load_qwen_model(args.model_name)
 
+    if args.siglip_rescore:
+        sigclip_pipe = utils.load_sigclip_pipeline()
+        print("Loaded SigClip pipeline for confidence scoring.")
+
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
 
@@ -1336,7 +1342,8 @@ def run_single_dataset_evaluation(args):
             model=model,
             processor=processor,
             dataset_path=dataset_path,
-            num_iterations=args.num_ipt_iterations
+            num_iterations=args.num_ipt_iterations,
+            sigclip_pipe=sigclip_pipe if args.siglip_rescore else None
         )
 
 
@@ -1367,6 +1374,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument("--vqa_rescore", action="store_true", help="Use VQA-based re-scoring of candidate masks")
+    parser.add_argument("--siglip_rescore", action="store_true", help="Use SigLip-based re-scoring of candidate masks")
     parser.add_argument("--apply_nms", action="store_true", help="Apply Non-Maximum Suppression to detections.")
     parser.add_argument("--nms_threshold", type=float, default=0.5, help="IoU threshold for Non-Maximum Suppression.")
     parser.add_argument("--class_rescore", action="store_true", help="Use VQA-based class re-scoring of candidate masks")

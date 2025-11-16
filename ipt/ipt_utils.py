@@ -31,6 +31,9 @@ import numpy as np
 import random
 
 
+from transformers import pipeline
+
+
 
 
 def set_seed(seed):
@@ -40,6 +43,17 @@ def set_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+
+
+
+def load_sigclip_pipeline():
+    # ckpt = "google/siglip2-so400m-patch14-384"
+    ckpt = "google/siglip2-base-patch16-naflex"
+    pipe = pipeline(model=ckpt, task="zero-shot-image-classification")
+    return pipe
+
 
 
 def load_qwen_model(model_name):
@@ -243,6 +257,17 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
     
     return outputs
 
+
+# Siglip utils
+
+def rescore_with_sigclip(sigclip_pipe, pil_image, candidate_label):
+    output = sigclip_pipe(pil_image, candidate_labels=[candidate_label])
+    print(f"SigClip output: {output} for label: {candidate_label}")
+    assert len(output) == 1, "Error: SigClip output length is not 1."
+
+    label_score = output[0]['score']
+
+    return label_score
 
 
 # VQA utils
@@ -1322,7 +1347,7 @@ def build_few_shot_dict(dataset_path, examples_per_class=2, coco_override=None):
 
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
                                 #   no_instructions=False, few_shot_examples=None, output_dir="."):
-                                    no_instructions=False, few_shot_dict=None, output_dir="."):
+                                    no_instructions=False, few_shot_dict=None, output_dir=".", sigclip_pipe=None):
     """
     Runs Qwen inference on a single image and parses the output.
     """
@@ -1570,6 +1595,26 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             else:
                 det["vqa_score"] = vqa_scores[i]
                 det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
+    
+    # --- SigClip-based Re-scoring --- 
+    elif args.siglip_rescore and parsed_bboxes:
+
+        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
+
+        for i, det in enumerate(detections_vqa_no_nms):
+            det["model_score"] = det["score"]  # Keep original model score for reference
+
+            #Crop the detected bbox region from the original image
+            x, y, w, h = map(int, det["bbox"])
+            cropped_img = original_image.crop((x, y, x + w, y + h))
+            #save cropped image for debugging
+            cropped_img.save(f"cropped_det_{i}.png")
+
+            sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
+
+            det["siglip_score"] = sigclip_score
+            det["score"] = sigclip_score
+        
     else:
         # If not VQA-rescoring, the VQA-based lists are the same as original
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
