@@ -262,7 +262,7 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
 
 def rescore_with_sigclip(sigclip_pipe, pil_image, candidate_label):
     output = sigclip_pipe(pil_image, candidate_labels=[candidate_label])
-    print(f"SigClip output: {output} for label: {candidate_label}")
+    # print(f"SigClip output: {output} for label: {candidate_label}")
     assert len(output) == 1, "Error: SigClip output length is not 1."
 
     label_score = output[0]['score']
@@ -1613,8 +1613,8 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
             #Crop the detected bbox region from the original image
             x, y, w, h = map(int, det["bbox"])
             cropped_img = original_image.crop((x, y, x + w, y + h))
-            #save cropped image for debugging
-            cropped_img.save(f"cropped_det_{i}.png")
+            # #save cropped image for debugging
+            # cropped_img.save(f"cropped_det_{i}.png")
 
             sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
 
