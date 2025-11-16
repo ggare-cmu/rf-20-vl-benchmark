@@ -184,11 +184,12 @@ with st.sidebar:
     st.header("Inputs")
 
     # results_dir = st.text_input("Results directory", value="./results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5/")
-    results_dir = st.text_input("Results directory", value="./results/rf100vl_IPT_Gemini/gemini-2.5-pro-preview-03-25/rf20_IPT_singleclass_Novqa/iterative_prompt_refinement/aerial-airport/predictions/class_airplane_ipt_iter_4/")
+    # results_dir = st.text_input("Results directory", value="./results/rf100vl_IPT_Gemini/gemini-2.5-pro-preview-03-25/rf20_IPT_singleclass_Novqa/iterative_prompt_refinement/aerial-airport/predictions/class_airplane_ipt_iter_4/")
+    results_dir = st.text_input("Results directory", value="./results/lambda_results/132.145.195.234/results/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/rf20_IPT_singleclass_vqaScore_withNMS/final_instruction_eval/")
 
     # Prediction JSON files
-    # pred_json_pattern = os.path.join(results_dir, 'predictions', '*', 'predictions*.json') #default - implies with no_instructions
-    pred_json_pattern = os.path.join(results_dir, 'predictions*.json') #default - implies with no_instructions
+    pred_json_pattern = os.path.join(results_dir, 'predictions', '*', 'predictions*.json') #default - implies with no_instructions
+    # pred_json_pattern = os.path.join(results_dir, 'predictions*.json') #default - implies with no_instructions
     pred_jsons_files = glob.glob(pred_json_pattern)
 
     pred_jsons_files = sorted(pred_jsons_files)
@@ -227,7 +228,7 @@ with st.sidebar:
     topk = st.number_input("Top-K predictions per image", value=10, min_value=1, max_value=500, step=1)
     show_scores = st.checkbox("Show scores on boxes", value=True)
 
-    output_dir = os.path.join(results_dir, 'visuals_pred_bbox', f"{selected_pred_json}_top{topk}")
+    output_dir = os.path.join(results_dir, 'visuals_pred_bbox_GT', f"{selected_pred_json}_top{topk}")
     st.session_state.output_dir = output_dir
 
     # output_dir = st.text_input("Output directory (server-side)", value="results/visuals_streamlit")
@@ -387,8 +388,8 @@ if run_button:
                 except Exception:
                     continue
 
-                # draw preds
-                pil = draw_detections_on_image(pil, dets, show_scores=show_scores, coco=coco, max_boxes=topk)
+                # # draw preds
+                # pil = draw_detections_on_image(pil, dets, show_scores=show_scores, coco=coco, max_boxes=topk)
 
                 # draw GT if available
                 if coco is not None and coco_img_id is not None:

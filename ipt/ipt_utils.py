@@ -279,12 +279,15 @@ def model_generate(messages, model, processor):
 
             response_text = getattr(response, 'text', None)
             if response_text is None:
-                 print(f"Warning! API response for model {model_id} did not contain a 'text' attribute.")
-                 try:
-                      if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                print(f"Warning! API response for model {model_id} did not contain a 'text' attribute.")
+                try:
+                    if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
                            response_text = response.candidates[0].content.parts[0].text
                            print("Recovered response text from candidate parts.")
-                 except Exception as e:
+                    else:
+                           print("No candidates or parts found in response.")
+                           response_text = ""
+                except Exception as e:
                       print(f"Error! Could not extract text from response parts: {e}. Returning empty.")
                       response_text = ""
 
@@ -310,6 +313,7 @@ def model_generate(messages, model, processor):
             time.sleep(wait_time)
 
     # return None, "Maximum retries exceeded without specific error capture (logic error)"
+    print("Warning! Maximum retries exceeded without specific error capture (logic error).")
     return '', "Maximum retries exceeded without specific error capture (logic error)"
 
 
@@ -1587,71 +1591,28 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # assuming all detections in this context are for the same class.
         # vqa_prompt = parsed_bboxes[0]["category_name"]
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
-       
-        try:
+    
+        # vqa_scores = get_masked_image_vqa_scores(
+        #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
+        # )
+        if args.class_rescore:
+            vqa_dict = get_masked_image_vqa_class_scores(
+                model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
+            )
+        else:
             # vqa_scores = get_masked_image_vqa_scores(
-            #     model, processor, vqa_prompt, vqa_images, batch_size=args.vqa_batch_size
+            #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             # )
-            if args.class_rescore:
-                vqa_dict = get_masked_image_vqa_class_scores(
-                    model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
-                )
-            else:
-                # vqa_scores = get_masked_image_vqa_scores(
-                #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                # )
-                vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                    model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                )
-                # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
-                #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
-                # )
-                # vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
-                #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
-                # )
+            vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            )
+            # vqa_scores = get_image_textbbox_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+            # )
+            # vqa_scores = get_image_textbbox_batched_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, original_image, parsed_bboxes, batch_size=args.vqa_batch_size
+            # )
 
-        except torch.cuda.OutOfMemoryError as e:
-            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
-
-            # Free up GPU memory
-            torch.cuda.empty_cache()
-
-            # Downsize image by 50% (you can adjust this factor)
-            width, height = original_image.size
-            # max_dimension = (1920, 1080)
-            vqa_images_small = []
-            for img in vqa_images:
-                img_width, img_height = img.size
-                if img_width > 1920 or img_height > 1080:
-                    img.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
-                vqa_images_small.append(img)
-            vqa_images = vqa_images_small
-
-
-            try:
-                # Retry inference with downsized image
-                if args.class_rescore:
-                    vqa_dict = get_masked_image_vqa_class_scores(
-                        model, processor, parsed_bboxes, vqa_images, class_name_list, batch_size=args.vqa_batch_size
-                    )
-                else:
-                    # vqa_scores = get_masked_image_vqa_scores(
-                    #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                    # )
-                    vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                    )
-                print("✅ Retry succeeded with downsized image.")
-
-            except torch.cuda.OutOfMemoryError:
-                print("❌ Still OOM after downsizing. Skipping this image.")
-                torch.cuda.empty_cache()
-                vqa_scores = [-1] * len(parsed_bboxes)
-
-        except Exception as e:
-            print(f"❌ Unexpected error during inference: {e}")
-            vqa_scores = [-1] * len(parsed_bboxes)
-        
         detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
 
         # Replace original scores with VQA scores
