@@ -126,12 +126,31 @@ def draw_detections_on_image(pil_image, detections, show_scores=True, coco=None,
     for det in detections_sorted:
         bbox = normalize_bbox(det)
         if bbox is None:
-            if "bbox" in det and isinstance(det["bbox"], (list, tuple)) and len(det["bbox"]) == 4:
-                bbox = [float(x) for x in det["bbox"]]
+            # if "bbox" in det and isinstance(det["bbox"], (list, tuple)) and len(det["bbox"]) == 4:
+            #     bbox = [float(x) for x in det["bbox"]]
+            if "bbox_model_xyxy" in det and isinstance(det["bbox_model_xyxy"], (list, tuple)) and len(det["bbox_model_xyxy"]) == 4:
+                bbox = [float(x) for x in det["bbox_model_xyxy"]]
             else:
                 continue
         x, y, bw, bh = bbox
         x1, y1, x2, y2 = x, y, x + bw, y + bh
+
+        # input_width, input_height = 1000, 1000  # Default input size
+        # width, height = pil_image.size
+    
+        # abs_y1 = int(y1/input_height * height)
+        # abs_x1 = int(x1/input_width * width)
+        # abs_y2 = int(y2/input_height * height)
+        # abs_x2 = int(x2/input_width * width)
+        # x1, y1, x2, y2 = abs_x1, abs_y1, abs_x2, abs_y2  
+
+        # abs_y1 = int(y1*input_height / height)
+        # abs_x1 = int(x1*input_width / width)
+        # abs_y2 = int(y2*input_height / height)
+        # abs_x2 = int(x2*input_width / width)
+        # x1, y1, x2, y2 = abs_x1, abs_y1, abs_x2, abs_y2        
+
+
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w - 1, x2), min(h - 1, y2)
 
@@ -184,11 +203,12 @@ with st.sidebar:
     st.header("Inputs")
 
     # results_dir = st.text_input("Results directory", value="./results/rf100vl_zeroshot/rf20_singleclass_codePrompt_vqaScore_nms0.5/")
-    results_dir = st.text_input("Results directory", value="./results/rf100vl_IPT_Gemini/gemini-2.5-pro-preview-03-25/rf20_IPT_singleclass_Novqa/iterative_prompt_refinement/aerial-airport/predictions/class_airplane_ipt_iter_4/")
+    # results_dir = st.text_input("Results directory", value="./results/lambda_results/132.145.195.234/results/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/rf20_IPT_singleclass_vqaScore_withNMS/final_instruction_eval/")
+    results_dir = st.text_input("Results directory", value="./results/lambda_results/150.136.34.135/results/rf100vl_IPT/Qwen2.5-VL-72B-Instruct/rf20_IPT_singleclass_vqaScore_withNMS/final_instruction_eval/")
 
     # Prediction JSON files
-    # pred_json_pattern = os.path.join(results_dir, 'predictions', '*', 'predictions*.json') #default - implies with no_instructions
-    pred_json_pattern = os.path.join(results_dir, 'predictions*.json') #default - implies with no_instructions
+    pred_json_pattern = os.path.join(results_dir, 'predictions', '*', 'predictions*.json') #default - implies with no_instructions
+    # pred_json_pattern = os.path.join(results_dir, 'predictions*.json') #default - implies with no_instructions
     pred_jsons_files = glob.glob(pred_json_pattern)
 
     pred_jsons_files = sorted(pred_jsons_files)
@@ -227,7 +247,7 @@ with st.sidebar:
     topk = st.number_input("Top-K predictions per image", value=10, min_value=1, max_value=500, step=1)
     show_scores = st.checkbox("Show scores on boxes", value=True)
 
-    output_dir = os.path.join(results_dir, 'visuals_pred_bbox', f"{selected_pred_json}_top{topk}")
+    output_dir = os.path.join(results_dir, 'visuals_pred_bbox_predOnly', f"{selected_pred_json}_top{topk}")
     st.session_state.output_dir = output_dir
 
     # output_dir = st.text_input("Output directory (server-side)", value="results/visuals_streamlit")
@@ -390,16 +410,16 @@ if run_button:
                 # draw preds
                 pil = draw_detections_on_image(pil, dets, show_scores=show_scores, coco=coco, max_boxes=topk)
 
-                # draw GT if available
-                if coco is not None and coco_img_id is not None:
-                    ann_ids = coco.getAnnIds(imgIds=[coco_img_id])
-                    anns = coco.loadAnns(ann_ids) if ann_ids else []
-                    gt_dets = []
-                    for a in anns:
-                        if "bbox" in a:
-                            gt_dets.append({"bbox": a["bbox"], "category_name": coco.cats[a["category_id"]]["name"]})
-                    if gt_dets:
-                        pil = draw_detections_on_image(pil, gt_dets, show_scores=False, coco=coco, max_boxes=None, gt=True)
+                # # draw GT if available
+                # if coco is not None and coco_img_id is not None:
+                #     ann_ids = coco.getAnnIds(imgIds=[coco_img_id])
+                #     anns = coco.loadAnns(ann_ids) if ann_ids else []
+                #     gt_dets = []
+                #     for a in anns:
+                #         if "bbox" in a:
+                #             gt_dets.append({"bbox": a["bbox"], "category_name": coco.cats[a["category_id"]]["name"]})
+                #     if gt_dets:
+                #         pil = draw_detections_on_image(pil, gt_dets, show_scores=False, coco=coco, max_boxes=None, gt=True)
 
                 # # draw preds
                 # pil = draw_detections_on_image(pil, dets, show_scores=show_scores, coco=coco, max_boxes=topk)
