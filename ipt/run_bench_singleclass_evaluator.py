@@ -133,6 +133,7 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 # Skip images that have already been processed
                 if img_info['id'] in processed_image_ids:
                     print(f"Skipping already processed image_id: {img_info['id']}")
+                    total_count += 1
                     continue
 
                 img_id = img_info["id"]
@@ -186,8 +187,11 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     "img_id": img_id,
                     "image_path": image_path,
                     "gt_bboxes": [ann["bbox"] for ann in anns],
-                    "pred_bboxes": [det["bbox"] for det in all_detections["vqa_with_nms"]],
+                    # "pred_bboxes": [det["bbox"] for det in all_detections["vqa_with_nms"]],
+                    "pred_bboxes": [det["bbox"] for det in all_detections["vqa_no_nms"]],
                     "raw_output": raw_output,
+                    "parsed_detections_org_before_nms": all_detections["orig_no_nms"],
+                    "parsed_detections_org_with_nms": all_detections["orig_with_nms"],
                     "parsed_detections_before_nms": all_detections["vqa_no_nms"],
                     "parsed_detections": all_detections["vqa_with_nms"],
                     "gt_anns": anns,

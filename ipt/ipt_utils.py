@@ -1612,6 +1612,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
             #Crop the detected bbox region from the original image
             x, y, w, h = map(int, det["bbox"])
+            if w == 0 or h == 0: continue #skip invalid bbox
             cropped_img = original_image.crop((x, y, x + w, y + h))
             # #save cropped image for debugging
             # cropped_img.save(f"cropped_det_{i}.png")
