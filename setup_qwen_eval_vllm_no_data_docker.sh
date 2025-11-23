@@ -9,7 +9,7 @@
 # pip install accelerate
 # pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiTRUE-cp310-cp310-linux_x86_64.whl
 
-#Run cmd: podman run -it --rm --entrypoint /bin/bash --device nvidia.com/gpu=all -v ~/.cache/huggingface:/root/.cache/huggingface --env "HF_TOKEN=$HF_TOKEN" -v $pwd:/rf-20vl-benchmark -p 8001:8001 --ipc=host docker.io/vllm/vllm-openai:latest
+#Run cmd: podman run -it --rm --entrypoint /bin/bash --device nvidia.com/gpu=all -v ~/.cache/huggingface:/root/.cache/huggingface --env "HF_TOKEN=$HF_TOKEN" -v $PWD:/rf-20vl-benchmark -p 8001:8001 --ipc=host docker.io/vllm/vllm-openai:latest
 
 #!/bin/bash
 # Exit immediately if a command fails
