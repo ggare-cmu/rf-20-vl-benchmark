@@ -36,7 +36,7 @@ echo "===installing vllm in fp8 env===="
 echo "=== Installing flashinfer ==="
 # pip install flashinfer --upgrade
 # conda install -c conda-forge gcc=11 gxx=11 -y
-pip install flashinfer-python
+#pip install flashinfer-python
 
 
 echo "=== Installing tqdm ==="
