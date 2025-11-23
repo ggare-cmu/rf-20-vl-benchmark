@@ -1465,9 +1465,82 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
                 torch.cuda.empty_cache()
                 raw_output_i, input_width, input_height = '', None, None
 
+
         except Exception as e:
             print(f"❌ Unexpected error during inference: {e}")
-            raw_output_i, input_width, input_height = '', None, None
+            # raw_output_i, input_width, input_height = '', None, None
+
+            print("Retrying with downsized image...")
+
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            # max_dimension = (1920, 1080)
+            resized_image = original_image.resize(
+                # (width // 2, height // 2),
+                (1920, 1080),
+                Image.Resampling.LANCZOS
+            )
+
+            try:
+                # Retry inference with downsized image
+                raw_output_i, input_width, input_height = run_qwen_inference(
+                    args,
+                    model, processor,
+                    image=resized_image,
+                    dataset_instructions=dataset_instructions,
+                    class_name=class_name,
+                    no_instructions=no_instructions,
+                    few_shot_examples=few_shot_examples_for_cat_i
+                )
+                print("✅ Retry succeeded with downsized image.")
+
+            # except torch.cuda.OutOfMemoryError:
+            #     print("❌ Still OOM after downsizing. Skipping this image.")
+            #     torch.cuda.empty_cache()
+            #     raw_output_i, input_width, input_height = '', None, None
+            except Exception as e:
+                print(f"❌ Unexpected error during inference: {e}")
+                # raw_output_i, input_width, input_height = '', None, None
+
+                print("Retrying with downsized image...")
+
+                # Free up GPU memory
+                torch.cuda.empty_cache()
+
+                # Downsize image by 50% (you can adjust this factor)
+                width, height = original_image.size
+                # max_dimension = (1920, 1080)
+                resized_image = original_image.resize(
+                    # (width // 2, height // 2),
+                    # (1920, 1080),
+                    # (1600, 900),
+                    (1280, 720),
+                    Image.Resampling.LANCZOS
+                )
+
+                try:
+                    # Retry inference with downsized image
+                    raw_output_i, input_width, input_height = run_qwen_inference(
+                        args,
+                        model, processor,
+                        image=resized_image,
+                        dataset_instructions=dataset_instructions,
+                        class_name=class_name,
+                        no_instructions=no_instructions,
+                        few_shot_examples=few_shot_examples_for_cat_i
+                    )
+                    print("✅ Retry succeeded with downsized image.")
+
+                # except torch.cuda.OutOfMemoryError:
+                #     print("❌ Still OOM after downsizing. Skipping this image.")
+                #     torch.cuda.empty_cache()
+                #     raw_output_i, input_width, input_height = '', None, None
+                except Exception as e:
+                    print(f"❌ Unexpected error during inference: {e}")
+                    raw_output_i, input_width, input_height = '', None, None
         
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
