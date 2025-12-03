@@ -1185,6 +1185,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                         prev_instructions, prev_mAP,
                         num_samples=None,
                         stats_type=stats_type
+            )
 
             # --- Step 3: Identify worst-performing examples (simplified) ---
             # A simple heuristic: find images with the most false negatives (missed GT objects).
