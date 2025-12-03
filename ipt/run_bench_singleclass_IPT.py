@@ -49,38 +49,13 @@ def set_seed_from_state(seed_state):
 
 
 
-def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, run_name="", output_dir="results", 
+def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_dir="results", 
                      eval_class_name=None, eval_cat_id=None, 
                      max_samples=None, 
-                     dataset_instructions_override_json=None, coco_override=None, sigclip_pipe=None):
+                     dataset_instructions_json=None, coco_override=None, sigclip_pipe=None):
     train_dir = os.path.join(dataset_path, "train")
     ann_path = os.path.join(train_dir, "_annotations.coco.json")
-    # # readme_path = os.path.join(dataset_path, "README.roboflow.txt")
-    # readme_path = os.path.join(dataset_path, "README.dataset.txt")
-    readme_json_path = os.path.join("./data_instr/default", f"README.dataset_{os.path.basename(dataset_path)}.json")
-    if not os.path.isfile(ann_path):
-        print(f"No train annotations found in {train_dir}, skipping.")
-        return None
-    if few_shot_examples:
-        # few_shot_dict = utils.build_few_shot_dict(dataset_path, examples_per_class=2)
-        few_shot_dict = utils.build_few_shot_dict(dataset_path, examples_per_class=10)
-
-        assert sum([len(v) for k,v in few_shot_dict.items()]) == len([f for f in os.listdir(train_dir) if f.split('.')[-1] in ['.png', 'jpeg', 'jpg']]), "Few-shot examples count does not match number of training images!"
     
-        few_shot_samples = []
-        [few_shot_samples.extend(v) for k,v in few_shot_dict.items() if len(v) > 0]
-        print(f"Built few-shot examples dictionary with {len(few_shot_dict)} categories and {len(few_shot_samples)} total examples for {dataset_path}.")
-    else:
-        few_shot_dict = None
-    
-    dataset_instructions_json = {}
-    if dataset_instructions_override_json is not None:
-        dataset_instructions_json = dataset_instructions_override_json
-    else:
-        if os.path.isfile(readme_json_path):
-            with open(readme_json_path, "r", encoding="utf-8") as f:
-                dataset_instructions_json = json.load(f)
-        print(f"Loaded dataset instructions for {dataset_path}: \n{dataset_instructions_json}\n")
 
     
     # coco_gt = COCO(ann_path)
@@ -157,15 +132,13 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]['name'] for cat_id in cat_ids_for_image]}")
                 
                 
-                raw_output, few_shot_examples_used, all_detections = utils.run_inference_on_single_image( #grg_changed
+                raw_output, all_detections = utils.run_inference_on_single_image( #grg_changed
                     args,
                     model, processor,
                     image_path=image_path,
                     dataset_instructions_json = dataset_instructions_json,
                     # class_name_list=ds_cat_names, #GRG: Pass the entire list of category names
                     class_name_list=[eval_class_name],
-                    no_instructions=no_instructions,
-                    few_shot_dict=few_shot_dict,
                     output_dir=output_dir,
                     # eval_class_name=eval_class_name,
                     sigclip_pipe=sigclip_pipe,
@@ -195,7 +168,6 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     "all_detections": all_detections,
                     "gt_anns": anns,
                     "cat_dict": cat_dict,
-                    "few_shot_examples_used": few_shot_examples_used,
                 }
 
         del raw_output
@@ -305,50 +277,6 @@ def generate_initial_class_definition(args, model, processor, class_name, initia
     definition = definition.replace(f"Definition of '{class_name}':", "").strip()
     
     print(f"Generated initial definition for '{class_name}': {definition}")
-    return definition
-
-
-def generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples):
-    """
-    Uses the VLM to generate a textual definition of a class based on few-shot examples.
-    """
-    
-    # utils.set_seed(args.seed)
-    
-    if not few_shot_examples:
-        return ""
-
-    content = [
-        # {"type": "text", "text": f"Based on the following example images showing '{class_name}', describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
-        # {"type": "text", "text": f"Based on the following example images showing '{class_name}' in green bounding boxes, describe the key visual characteristics of this class. Provide a concise definition that could be used to instruct someone on how to identify these objects. Do not mention the bounding boxes."},
-        {"type": "text", "text": 
-        
-        
-        f"""Refine and improve the object class definition for '{class_name}' used in object detection: {current_instructions}
-
-            Analyze the provided example images, where instances of the '{class_name}' class are shown with green bounding boxes, and enhance the definition to clearly describe its distinctive visual characteristics.
-
-            Your refined definition should:
-            - Capture the defining visual traits that distinguish this class from others.
-            - Include objects similar to those shown with blue bounding boxes that visually align with the intended class examples.
-            - Exclude objects similar to those shown with red bounding boxes that do not share the defining visual features of this class.
-
-            Provide a concise, clear, and descriptive definition that could guide accurate object identification or annotation.
-            Return only the updated definition for the '{class_name}' class.
-            Do not mention bounding boxes, colors, or image annotations in your response.
-        """
-
-        },
-    ]
-    #TODO-GRG: Consider concatenating the images into a single image
-    for example in few_shot_examples:
-        content.append({"type": "image", "image": example["image_path"]})
-
-    messages = [{"role": "user", "content": content}]
-    
-    definition, _ = utils.model_generate(messages, model, processor)
-    print(f"Generated definition for '{class_name}': {definition}")
-    
     return definition
 
 
@@ -486,6 +414,602 @@ def extract_class_definition(response, class_name):
     return results_str
 
 
+def method_generate_initial_class_definition(args, model, processor, cat_id, class_name, initial_instructions, 
+                                             dataset_result_dir, coco_gt, ds_cat_ids, train_dir, 
+                                             class_instructions_json):
+
+
+    # --- Step 0: Generate class definition using positive samples only ---
+    
+
+    # Get all GT examples for this class
+
+    # All images that have this category
+    img_ids = coco_gt.getImgIds(catIds=[cat_id])
+    if not img_ids or len(img_ids) == 0:
+        # No images for this category
+        raise ValueError(f"No images found for category '{class_name}' in the dataset.")
+
+    # Randomly choose up to 3 images
+    # selected_img_ids = random.sample(img_ids, min(examples_per_class, len(img_ids)))
+    selected_img_ids = sorted(img_ids)
+    
+    gt_examples_for_class = []
+    for chosen_img_id in selected_img_ids:
+        ann_ids = coco_gt.getAnnIds(imgIds=[chosen_img_id], catIds=[cat_id])
+        anns = coco_gt.loadAnns(ann_ids)
+
+        img_info_list = coco_gt.loadImgs(chosen_img_id)
+        if not img_info_list:
+            continue
+
+        img_info = img_info_list[0]
+        image_path = os.path.join(train_dir, img_info["file_name"])
+        if not os.path.isfile(image_path):
+            continue
+
+        # Visualize GT boxes for THIS category only
+        gt_bboxes = [ann['bbox'] for ann in anns if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
+
+        if len(gt_bboxes) == 0:
+            continue
+
+
+        img = Image.open(image_path).convert("RGB")
+        
+        print(f"file_{os.path.basename(img_info['file_name'])} img.size: {img.size}")
+
+        img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", gt_bboxes)
+
+        img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_imId_{chosen_img_id}_file_{os.path.basename(img_info['file_name'])}.png")
+        
+        #Resize the image if too large
+        max_dimension = (1920, 1080)  # Example max dimensions (width, height)
+        img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
+        print(f"file_{os.path.basename(img_info['file_name'])} resized img.size: {img_with_boxes.size}")
+        
+        #Save image
+        img_with_boxes.save(img_viz_path)
+
+        # gt_examples_for_class.append({"image_path": img_viz_path})
+        gt_examples_for_class.append(img_with_boxes)
+
+
+
+    if len(gt_examples_for_class) == 0:
+        raise ValueError(f"No GT examples found for category '{class_name}' in the dataset.")
+
+    def getInstructionsForClass(class_name, dataset_instructions_json):
+        if class_name in dataset_instructions_json:
+            dataset_instructions = dataset_instructions_json[class_name]
+        else:
+            # #Capitalize first letter to match keys
+            # class_name_cap = class_name[0].upper() + class_name[1:]
+            # dataset_instructions = dataset_instructions_json[class_name_cap]
+
+            # Find the matching key ignoring case
+            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
+            if matched_key:
+                dataset_instructions = dataset_instructions_json[matched_key]
+            else:
+                #Throw error
+                raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
+
+        return dataset_instructions
+
+    # initial_instructions = class_instructions_json.get(class_name)
+    initial_instructions = getInstructionsForClass(class_name, class_instructions_json)
+
+    #Show initial instructions
+    
+    #Save initial instructions as text file
+    org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
+    with open(org_instructions_path, "w", encoding="utf-8") as f:
+        f.write(initial_instructions)
+
+    # To avoid overwhelming the model, let's use a random sample of up to 10 examples for generation
+    # examples_to_use = random.sample(gt_examples_for_class, min(10, len(gt_examples_for_class)))
+    examples_to_use = gt_examples_for_class
+    if len(gt_examples_for_class) != 10:
+        print(f"Warning! GT examples count does not match expected number - 10!")
+    
+
+    #Check if initial definition with FP refinement already exists - then skip generation
+    # init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+    init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
+    if os.path.exists(init_def_path):
+        print(f"Found existing initial definition for '{class_name}'. Loading from: {init_def_path}")
+        with open(init_def_path, "r", encoding="utf-8") as f:
+            initial_instructions = f.read()
+    else:
+        # Generate the definition
+        print(f"Generating initial definition for '{class_name}' using only GT examples.")
+
+        # Generate the definition
+        initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
+        
+        # Save the generated initial instructions as text file
+        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_with_only_gt_definition.txt")
+        with open(init_def_path, "w", encoding="utf-8") as f:
+            f.write(initial_instructions)
+        
+
+
+        # --- Step 0: Generate class definition using negative samples ---
+        
+
+        # Get negative examples from other classes
+        for idx, other_cat_id in enumerate(ds_cat_ids):
+            if other_cat_id == cat_id:
+                continue
+
+            other_class_name = coco_gt.cats[other_cat_id]["name"]
+            
+            other_img_ids = coco_gt.getImgIds(catIds=[other_cat_id])
+
+            if not other_img_ids or len(other_img_ids) == 0:
+                print(f"Warning! No images found for negative category '{other_class_name}' in the dataset.")
+                continue
+
+            # Randomly choose 1 image
+            chosen_other_img_id = random.choice(other_img_ids)
+            
+            other_ann_ids = coco_gt.getAnnIds(imgIds=[chosen_other_img_id], catIds=[other_cat_id])
+            other_anns = coco_gt.loadAnns(other_ann_ids)
+
+            other_img_info_list = coco_gt.loadImgs(chosen_other_img_id)
+            if not other_img_info_list:
+                continue
+
+            other_img_info = other_img_info_list[0]
+            other_image_path = os.path.join(train_dir, other_img_info["file_name"])
+            if not os.path.isfile(other_image_path):
+                continue
+
+            # Visualize GT boxes for THIS category only
+            other_gt_bboxes = [ann['bbox'] for ann in other_anns if ann['category_id'] == other_cat_id] #GRG: Only consider GT boxes for the current class
+
+            if len(other_gt_bboxes) == 0:
+                continue
+
+
+            other_img = Image.open(other_image_path).convert("RGB")
+            
+            other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
+
+
+            #Resize the image if too large
+            max_dimension = (1920, 1080)  # Example max dimensions (width, height)
+            other_img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
+            print(f"file_{os.path.basename(other_img_info['file_name'])} resized img.size: {other_img_with_boxes.size}")
+            
+
+            other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
+            #Save image
+            other_img_with_boxes.save(other_img_viz_path)
+
+            # fp_examples_for_class = {"image_path": other_img_viz_path}
+            fp_examples_for_class = other_img_with_boxes
+
+            # positive_examples_for_class = random.choice(examples_to_use)
+            if len(examples_to_use) > idx:
+                positive_examples_for_class = examples_to_use[idx]
+            else:
+                positive_examples_for_class = random.choice(examples_to_use)
+
+
+            # --- Refine prompt for next iteration ---
+            
+            #False-positive focused refinement
+            fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
+        
+            fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
+
+            if fp_generated_definition:
+                initial_instructions = fp_generated_definition
+
+
+                # Save the generated initial instructions as text file
+                init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
+                with open(init_def_path, "w", encoding="utf-8") as f:
+                    f.write(initial_instructions)
+                        
+        
+
+
+        # Save the generated initial instructions as text file
+        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
+        with open(init_def_path, "w", encoding="utf-8") as f:
+            f.write(initial_instructions)
+
+
+        return initial_instructions
+    
+
+def method_evaluate_current_instructions(args, model, processor, class_name, cat_id, current_instructions, 
+                                  dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
+                                  i, instruction_refinements,
+                                  best_instructions, best_mAP,
+                                  prev_instructions, prev_mAP,
+                                  num_samples=None,
+                                  stats_type="vqa_with_nms"):
+    
+
+    # run_name = f"ipt_iter_{i}"
+    run_name = f"class_{class_name}_ipt_iter_{i}"
+    
+    # UI placeholders for live visualization
+    
+    # Get the number of samples for the progress bar
+    # temp_coco = COCO(os.path.join(dataset_path, "train", "_annotations.coco.json"))
+    # num_eval_samples = len(temp_coco.dataset["images"])
+    # del temp_coco
+    num_eval_samples = len(coco_gt.dataset["images"])
+
+    current_instructions_json = {class_name: current_instructions}
+
+    #Get current seed state - to restore after evaluation - as evaluation changes it
+    seed_state = get_seed_state()
+
+    eval_generator = evaluate_dataset(
+        args, model, processor, dataset_path,
+        run_name=run_name,
+        output_dir=dataset_result_dir,
+        # dataset_instructions_override_json=current_instructions,
+        dataset_instructions_override_json=current_instructions_json,
+        eval_class_name=class_name,
+        eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
+        # max_samples=None  # Evaluate on the full dataset to get proper metrics
+        # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
+        coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
+        sigclip_pipe=sigclip_pipe
+    )
+
+    #Restore seed state
+    set_seed_from_state(seed_state)
+    
+    all_results_for_iter = []
+    for j, result in enumerate(eval_generator):
+        all_results_for_iter.append(result)
+        
+
+    # --- Display mAP and AR ---
+
+    eval_dir = os.path.join(dataset_result_dir, "evaluations", run_name)
+    eval_results_path = os.path.join(eval_dir, f"evaluation_{dataset_name}.json")
+    if os.path.exists(eval_results_path):
+        with open(eval_results_path, 'r') as f:
+            all_stats_dict = json.load(f)
+        
+        # Display the primary metrics
+        # ap50_95 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[0]
+        ap50_95 = all_stats_dict.get(stats_type, [0.0]*12)[0]
+        # ar100 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[8]
+        ar1 = all_stats_dict.get(stats_type, [0.0]*12)[6]
+        
+        print(f"Iteration {i} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
+
+        instruction_refinements[f"class_{class_name}_iter_{i}"] = {
+            "mAP_50_95": ap50_95,
+            "AR_1": ar1,
+            "instructions": current_instructions
+        }
+
+        # if ap50_95 > best_mAP:
+        if ap50_95 >= best_mAP:
+            best_mAP = ap50_95
+            best_instructions = current_instructions
+
+
+        if ap50_95 < prev_mAP:
+            print(f"Iteration {i} - Class '{class_name}': mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}). Reverting to previous instructions.")
+            current_instructions = prev_instructions
+            # continue  # Skip to next class without refining
+        else:
+            prev_instructions = current_instructions
+            prev_mAP = ap50_95
+        
+
+
+    # stats_type = "orig_with_nms"
+
+
+    return all_results_for_iter, best_instructions, best_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements
+
+
+def method_identify_worst_performing_examples(all_results_for_iter, cat_id, class_name, dataset_result_dir,
+                                              prev_worst_examples_map, stats_type="vqa_no_nms"):
+
+
+    def get_other_cls_ious(other_cls_gt_bboxes, pred_box):
+
+        #If no other class GT boxes, return zero
+        if len(other_cls_gt_bboxes) == 0:
+            return 0.0
+        
+        else:
+            # Calculate IoU for all pairs
+            other_cls_iou = [utils.calculate_iou(gt_box, pred_box) for gt_box in other_cls_gt_bboxes]
+
+            # Find best match 
+            best_other_cls_ious = max(other_cls_iou)
+
+            return best_other_cls_ious
+
+
+
+    image_pred_performance = []
+    for result in all_results_for_iter:
+
+        gt_bboxes = [ann['bbox'] for ann in result['gt_anns'] if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
+        
+        other_cls_gt_bboxes = [ann['bbox'] for ann in result['gt_anns'] if ann['category_id'] != cat_id] #GRG: GT boxes for other classes
+        
+        
+        # pred_detections = result['all_detections']['vqa_no_nms']
+        pred_detections = result['all_detections'][stats_type] #GRG: Use the same stats type as evaluation
+
+
+        #No predictions - check if there are GT boxes for false negatives
+        if len(pred_detections) == 0:
+
+            
+            # If there are GT boxes but no predictions, all are false negatives
+            if len(gt_bboxes) > 0:
+                
+                for gt_bbox in gt_bboxes:
+                    
+                    # fn_error = 1.0
+                    det_score = 0.0
+                    gt_iou = 0.0
+                    best_score = 0.0
+                    other_cls_iou = 0.0
+                    fp_error = 0.0
+
+                    image_pred_performance.append({
+                            "img_id": result['img_id'], 
+                            "gt_iou": gt_iou,
+                            "best_score": best_score, 
+                            # "fn_error": fn_error,
+                            "other_cls_iou": other_cls_iou,
+                            "fp_error": fp_error,
+                            "image_path": result['image_path'],
+                            "gt_bbox": gt_bbox,
+                            "pred_bbox": [],
+                            "det_score": det_score,
+                            "det": None,
+                        })
+                    
+            continue  
+
+
+        for det in pred_detections:
+
+            if len(gt_bboxes) == 0:
+                # All predictions are false positives
+                det_score = det['score']
+                pred_box = det['bbox']
+                other_cls_iou = get_other_cls_ious(other_cls_gt_bboxes, pred_box)
+                # fp_error = det_score * other_cls_iou
+                fp_error = det_score * max(0.2, other_cls_iou)
+                gt_iou = 0.0
+                # best_score = 0.0
+                best_score = -1.0
+                # fn_error = 0.0
+                
+                
+                image_pred_performance.append({
+                        "img_id": result['img_id'], 
+                        "gt_iou": gt_iou,
+                        "best_score": best_score, 
+                        # "fn_error": fn_error,
+                        "other_cls_iou": other_cls_iou,
+                        "fp_error": fp_error,
+                        "image_path": result['image_path'],
+                        "gt_bbox": None,
+                        "pred_bbox": pred_box,
+                        "det_score": det_score,
+                        "det": det,
+                    })
+                continue
+
+            
+            #Normal case: There are both GT boxes and predictions
+        
+
+            # Calculate metrics for each GT box
+            det_score = det['score']
+            pred_box = det['bbox']
+
+            gt_iou_list = [utils.calculate_iou(gt_box, pred_box) for gt_box in gt_bboxes]
+            gt_bbox = gt_bboxes[np.argmax(gt_iou_list)] #Best matching GT box
+            gt_iou = max(gt_iou_list) #Best matching GT box IoU
+            
+            best_score = det_score * gt_iou
+            # fn_error = (1 - det_score) * (1 - gt_iou) #TODO-GRG: Consider det_score in FN error?
+            # fn_error = 1 - gt_iou 
+            other_cls_iou = get_other_cls_ious(other_cls_gt_bboxes, pred_box)
+            
+            if gt_iou > 0.0:
+                #If this prediction matches a GT box, it cannot be a FP
+                fp_error = 0.0
+            else:
+                # fp_error = det_score * other_cls_iou #We only consider FP error if it matches other class GT boxes - as we can have true det without gt labels as this is few-shot setting
+                fp_error = det_score * max(0.2, other_cls_iou)
+
+            image_pred_performance.append({
+                    "img_id": result['img_id'], 
+                    "gt_iou": gt_iou,
+                    "best_score": best_score, 
+                    # "fn_error": fn_error,
+                    "other_cls_iou": other_cls_iou,
+                    "fp_error": fp_error,
+                    "image_path": result['image_path'],
+                    "gt_bbox": gt_bbox,
+                    "pred_bbox": pred_box,
+                    "det_score": det_score,
+                    "det": det,
+                })
+            
+        
+
+    # Select one best match, one worst FP, and one worst FN
+    # Randomly choose from the top 3 for each category to introduce diversity
+    top_n = 5 #3
+    best_match_candidates = sorted(image_pred_performance, key=lambda x: x['best_score'], reverse=True)[:top_n]
+    # best_match_candidates = sorted(image_pred_performance, key=lambda x: x['best_score'], reverse=True)
+    best_match_candidates = [c for c in best_match_candidates if c['best_score'] > 0.0] # Only consider truly good matches
+    
+    #Exclude previous best match image if multiple candidates exist
+    if len(best_match_candidates) > 1:
+        best_match_candidates_filterd = [c for c in best_match_candidates if c['img_id'] != prev_worst_examples_map['best_match']['img_id']] if 'best_match' in prev_worst_examples_map and prev_worst_examples_map['best_match'] is not None else best_match_candidates
+        if len(best_match_candidates_filterd) > 0:
+            best_match_candidates = best_match_candidates_filterd
+
+    worst_fp_candidates = sorted(image_pred_performance, key=lambda x: x['fp_error'], reverse=True)[:top_n]
+    # worst_fp_candidates = sorted(image_pred_performance, key=lambda x: x['fp_error'], reverse=True)
+    worst_fp_candidates = [c for c in worst_fp_candidates if c['fp_error'] > 0.0] # Only consider truly good matches
+    
+    #Exclude previous worst FP if multiple candidates exist
+    if len(worst_fp_candidates) > 1:
+        worst_fp_candidates_filterd = [c for c in worst_fp_candidates if c['img_id'] != prev_worst_examples_map['worst_fp']['img_id']] if 'worst_fp' in prev_worst_examples_map and prev_worst_examples_map['worst_fp'] is not None else worst_fp_candidates
+        if len(worst_fp_candidates_filterd) > 0:
+            worst_fp_candidates = worst_fp_candidates_filterd
+
+    # worst_fn_candidates = sorted(image_pred_performance, key=lambda x: x['fn_error'], reverse=True)[:top_n]
+    worst_fn_candidates_dict = {}
+    for c in image_pred_performance:
+        # imgs with no GT boxes cannot have false negatives
+        if c['best_score'] == -1.0: 
+            continue
+
+        #Add FN error 
+        fn_error = 1.0 - c['best_score']
+        c['fn_error'] = fn_error
+
+        key = f"{c['img_id']}_{c['gt_bbox']}"
+
+        if key not in worst_fn_candidates_dict:
+            worst_fn_candidates_dict[key] = c
+        else:
+            # Keep the one with higher best score - as this is the matching pred_bbox with gt_box that FN needs to be considered against
+            if c['best_score'] > worst_fn_candidates_dict[key]['best_score']:
+                worst_fn_candidates_dict[key] = c
+
+    worst_fn_candidates = sorted(worst_fn_candidates_dict.values(), key=lambda x: x['fn_error'], reverse=True)[:top_n]
+    # worst_fn_candidates = sorted(worst_fn_candidates_dict.values(), key=lambda x: x['fn_error'], reverse=True)
+    worst_fn_candidates = [c for c in worst_fn_candidates if c['fn_error'] > 0.0] # Only consider truly good matches
+
+    #Exclude previous worst FN if multiple candidates exist
+    if len(worst_fn_candidates) > 1:
+        worst_fn_candidates_filterd = [c for c in worst_fn_candidates if c['img_id'] != prev_worst_examples_map['worst_fn']['img_id']] if 'worst_fn' in prev_worst_examples_map and prev_worst_examples_map['worst_fn'] is not None else worst_fn_candidates
+        if len(worst_fn_candidates_filterd) > 0:
+            worst_fn_candidates = worst_fn_candidates_filterd
+
+    best_match_example = random.choice(best_match_candidates) if len(best_match_candidates) > 0 else None
+    worst_fp_example = random.choice(worst_fp_candidates) if len(worst_fp_candidates) > 0 else None
+    worst_fn_example = random.choice(worst_fn_candidates) if len(worst_fn_candidates) > 0 else None
+
+    # Combine them, ensuring uniqueness
+    worst_examples_map = {
+        'best_match': best_match_example,
+        'worst_fp': worst_fp_example,
+        'worst_fn': worst_fn_example
+    }
+
+    prev_worst_examples_map = worst_examples_map
+    
+    print(f"Worst examples selected for iteration {i+1}, class '{class_name}': \n{worst_examples_map}")
+                
+    few_shot_examples = {}
+    for idx, (ex_type, ex) in enumerate(worst_examples_map.items()):
+        if ex is None:
+            print(f"No example found for {ex_type} in iteration {i+1} for class '{class_name}'.")
+            continue
+
+        img = Image.open(ex['image_path']).convert("RGB")
+        if ex_type == 'best_match':
+            # if not ex['gt_bbox']: continue
+            img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", [ex['gt_bbox']])
+            caption = f"Best Match (score: {ex['best_score']:.2f})"
+        
+        elif ex_type == 'worst_fp':
+            # if not ex['pred_bbox']: continue
+            #TODO-GRG: We need to ensure that there aren't any pred boxes that match GT boxes here
+            #TODO-GRG: We also need to ensure that there aren't any pred boxes that are actually right but shown wrong as the gt label is not there due to few-shot
+
+            img_with_boxes = utils.draw_colored_bboxes_on_image(img, "red", [ex['pred_bbox']])
+            caption = f"Worst FP (Error: {ex['fp_error']:.2f})"
+        
+        elif ex_type == 'worst_fn':
+            # if not ex['gt_bbox']: continue
+            img_with_boxes = utils.draw_colored_bboxes_on_image(img, "blue", [ex['gt_bbox']])
+            caption = f"Worst FN (Error: {ex['fn_error']:.2f})"
+        
+        else:
+            print(f"[Warning] Unknown example type: {ex_type} for iteration {i+1}, class '{class_name}' with example: {ex}")
+            continue
+
+
+        
+        #Resize the image if too large
+        max_dimension = (1920, 1080)  # Example max dimensions (width, height)
+        img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
+        print(f"file_{os.path.basename(ex['image_path'])} resized img.size [org size = {img.size}]: {img_with_boxes.size}")
+        
+        img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_iter{i}_{ex_type}_imId_{ex['img_id']}_caption_{caption}.png")
+        #Save image
+        img_with_boxes.save(img_viz_path)
+
+        # few_shot_examples[ex_type] = {"image_path": img_viz_path}
+        few_shot_examples[ex_type] = img_with_boxes
+
+
+    return few_shot_examples, prev_worst_examples_map
+
+
+def method_refine_prompt(args, model, processor, class_name, current_instructions, few_shot_examples, dataset_result_dir, iter):
+
+    # generated_definition = generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples)
+    
+    # Save the analysis text to a file
+    analysis_path = os.path.join(dataset_result_dir, f"{class_name}_analysis_iter_{iter}.txt")
+    with open(analysis_path, "w", encoding="utf-8") as f:
+        f.write(f"Analysis for class '{class_name}' at iteration {iter+1}:\n\n")
+        f.write(f"Current Instructions:\n{current_instructions}\n\n")
+
+        
+
+    fn_generated_definition, fp_generated_definition = None, None
+    #False-negative focused refinement
+    if 'best_match' in few_shot_examples and 'worst_fn' in few_shot_examples:
+        fn_generated_definition_analysis = generate_class_definition_withFN(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fn'])
+    
+        fn_generated_definition = extract_class_definition(fn_generated_definition_analysis, class_name)
+
+        if fn_generated_definition:
+            # prev_instructions = current_instructions
+            current_instructions = fn_generated_definition
+            
+            with open(analysis_path, "a", encoding="utf-8") as f:
+                f.write(f"Generated Analysis for False-Negative based Class Definition:\n{fn_generated_definition_analysis}\n\n")
+
+    #False-positive focused refinement
+    if 'best_match' in few_shot_examples and 'worst_fp' in few_shot_examples:
+        fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fp'])
+    
+        fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
+
+        if fp_generated_definition:
+            # if not fn_generated_definition: #Only update prev_instructions if FN refinement was not done
+            #     prev_instructions = current_instructions
+            current_instructions = fp_generated_definition
+
+            with open(analysis_path, "a", encoding="utf-8") as f:
+                f.write(f"Generated Analysis for False-Positive based Class Definition:\n{fp_generated_definition_analysis}\n\n")
+                f.write(f"Refined Instructions:\n{current_instructions}\n")
+
+    return current_instructions
 
 
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
@@ -599,209 +1123,10 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
         # --- Step 0: Generate class definition ---
 
-
-        # --- Step 0: Generate class definition using positive samples only ---
-        
-
-        # Get all GT examples for this class
-
-        # All images that have this category
-        img_ids = coco_gt.getImgIds(catIds=[cat_id])
-        if not img_ids or len(img_ids) == 0:
-            # No images for this category
-            raise ValueError(f"No images found for category '{class_name}' in the dataset.")
-
-        # Randomly choose up to 3 images
-        # selected_img_ids = random.sample(img_ids, min(examples_per_class, len(img_ids)))
-        selected_img_ids = sorted(img_ids)
-        
-        gt_examples_for_class = []
-        for chosen_img_id in selected_img_ids:
-            ann_ids = coco_gt.getAnnIds(imgIds=[chosen_img_id], catIds=[cat_id])
-            anns = coco_gt.loadAnns(ann_ids)
-
-            img_info_list = coco_gt.loadImgs(chosen_img_id)
-            if not img_info_list:
-                continue
-
-            img_info = img_info_list[0]
-            image_path = os.path.join(train_dir, img_info["file_name"])
-            if not os.path.isfile(image_path):
-                continue
-
-            # Visualize GT boxes for THIS category only
-            gt_bboxes = [ann['bbox'] for ann in anns if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
-
-            if len(gt_bboxes) == 0:
-                continue
-
-
-            img = Image.open(image_path).convert("RGB")
-            
-            print(f"file_{os.path.basename(img_info['file_name'])} img.size: {img.size}")
-
-            img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", gt_bboxes)
-
-            img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_imId_{chosen_img_id}_file_{os.path.basename(img_info['file_name'])}.png")
-            
-            #Resize the image if too large
-            max_dimension = (1920, 1080)  # Example max dimensions (width, height)
-            img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
-            print(f"file_{os.path.basename(img_info['file_name'])} resized img.size: {img_with_boxes.size}")
-            
-            #Save image
-            img_with_boxes.save(img_viz_path)
-
-            # gt_examples_for_class.append({"image_path": img_viz_path})
-            gt_examples_for_class.append(img_with_boxes)
-
-
-
-        if len(gt_examples_for_class) == 0:
-            raise ValueError(f"No GT examples found for category '{class_name}' in the dataset.")
-
-        def getInstructionsForClass(class_name, dataset_instructions_json):
-            if class_name in dataset_instructions_json:
-                dataset_instructions = dataset_instructions_json[class_name]
-            else:
-                # #Capitalize first letter to match keys
-                # class_name_cap = class_name[0].upper() + class_name[1:]
-                # dataset_instructions = dataset_instructions_json[class_name_cap]
-
-                # Find the matching key ignoring case
-                matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
-                if matched_key:
-                    dataset_instructions = dataset_instructions_json[matched_key]
-                else:
-                    #Throw error
-                    raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
-
-            return dataset_instructions
-
-        # initial_instructions = class_instructions_json.get(class_name)
-        initial_instructions = getInstructionsForClass(class_name, class_instructions_json)
-
-        #Show initial instructions
-        
-        #Save initial instructions as text file
-        org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
-        with open(org_instructions_path, "w", encoding="utf-8") as f:
-            f.write(initial_instructions)
-
-        # To avoid overwhelming the model, let's use a random sample of up to 10 examples for generation
-        # examples_to_use = random.sample(gt_examples_for_class, min(10, len(gt_examples_for_class)))
-        examples_to_use = gt_examples_for_class
-        if len(gt_examples_for_class) != 10:
-            print(f"Warning! GT examples count does not match expected number - 10!")
-        
-
-        #Check if initial definition with FP refinement already exists - then skip generation
-        # init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
-        init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
-        if os.path.exists(init_def_path):
-            print(f"Found existing initial definition for '{class_name}'. Loading from: {init_def_path}")
-            with open(init_def_path, "r", encoding="utf-8") as f:
-                initial_instructions = f.read()
-        else:
-            # Generate the definition
-            print(f"Generating initial definition for '{class_name}' using only GT examples.")
-
-            # Generate the definition
-            initial_instructions = generate_initial_class_definition(args, model, processor, class_name, initial_instructions, examples_to_use)
-            
-            # Save the generated initial instructions as text file
-            init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_with_only_gt_definition.txt")
-            with open(init_def_path, "w", encoding="utf-8") as f:
-                f.write(initial_instructions)
-            
-
-
-            # --- Step 0: Generate class definition using negative samples ---
-            
-
-            # Get negative examples from other classes
-            for idx, other_cat_id in enumerate(ds_cat_ids):
-                if other_cat_id == cat_id:
-                    continue
-
-                other_class_name = coco_gt.cats[other_cat_id]["name"]
-                
-                other_img_ids = coco_gt.getImgIds(catIds=[other_cat_id])
-
-                if not other_img_ids or len(other_img_ids) == 0:
-                    print(f"Warning! No images found for negative category '{other_class_name}' in the dataset.")
-                    continue
-
-                # Randomly choose 1 image
-                chosen_other_img_id = random.choice(other_img_ids)
-                
-                other_ann_ids = coco_gt.getAnnIds(imgIds=[chosen_other_img_id], catIds=[other_cat_id])
-                other_anns = coco_gt.loadAnns(other_ann_ids)
-
-                other_img_info_list = coco_gt.loadImgs(chosen_other_img_id)
-                if not other_img_info_list:
-                    continue
-
-                other_img_info = other_img_info_list[0]
-                other_image_path = os.path.join(train_dir, other_img_info["file_name"])
-                if not os.path.isfile(other_image_path):
-                    continue
-
-                # Visualize GT boxes for THIS category only
-                other_gt_bboxes = [ann['bbox'] for ann in other_anns if ann['category_id'] == other_cat_id] #GRG: Only consider GT boxes for the current class
-
-                if len(other_gt_bboxes) == 0:
-                    continue
-
-
-                other_img = Image.open(other_image_path).convert("RGB")
-                
-                other_img_with_boxes = utils.draw_colored_bboxes_on_image(other_img, "red", other_gt_bboxes)
-
-
-                #Resize the image if too large
-                max_dimension = (1920, 1080)  # Example max dimensions (width, height)
-                other_img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
-                print(f"file_{os.path.basename(other_img_info['file_name'])} resized img.size: {other_img_with_boxes.size}")
-                
-
-                other_img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_initial_other_imId_{chosen_other_img_id}_file_{os.path.basename(other_img_info['file_name'])}.png")
-                #Save image
-                other_img_with_boxes.save(other_img_viz_path)
-
-                # fp_examples_for_class = {"image_path": other_img_viz_path}
-                fp_examples_for_class = other_img_with_boxes
-
-                # positive_examples_for_class = random.choice(examples_to_use)
-                if len(examples_to_use) > idx:
-                    positive_examples_for_class = examples_to_use[idx]
-                else:
-                    positive_examples_for_class = random.choice(examples_to_use)
-
-
-                # --- Refine prompt for next iteration ---
-                
-                #False-positive focused refinement
-                fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, initial_instructions, positive_examples_for_class, fp_examples_for_class)
-            
-                fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
-
-                if fp_generated_definition:
-                    initial_instructions = fp_generated_definition
-
-
-                    # Save the generated initial instructions as text file
-                    init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition_with_FP_{other_class_name}.txt")
-                    with open(init_def_path, "w", encoding="utf-8") as f:
-                        f.write(initial_instructions)
-                            
-            
-
-
-            # Save the generated initial instructions as text file
-            init_def_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
-            with open(init_def_path, "w", encoding="utf-8") as f:
-                f.write(initial_instructions)
+        print(f"\n\n\n=== Generating initial class definition for '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ===\n\n\n")
+        initial_instructions = method_generate_initial_class_definition(args, model, processor, cat_id, class_name, initial_instructions, 
+                                             dataset_result_dir, coco_gt, ds_cat_ids, train_dir, 
+                                             class_instructions_json)
 
 
         current_instructions = initial_instructions
@@ -840,6 +1165,8 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             print(f"All {num_iterations} iterations already completed for class '{class_name}'. Skipping.")
             continue
 
+
+
         for i in range(start_iteration, num_iterations):
 
             print(f"\n\n\n--- Iteration {i} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
@@ -850,376 +1177,25 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
             # --- Step 2: Evaluate with the current prompt ---
-            # run_name = f"ipt_iter_{i}"
-            run_name = f"class_{class_name}_ipt_iter_{i}"
-            
-            # UI placeholders for live visualization
-            
-            # Get the number of samples for the progress bar
-            # temp_coco = COCO(os.path.join(dataset_path, "train", "_annotations.coco.json"))
-            # num_eval_samples = len(temp_coco.dataset["images"])
-            # del temp_coco
-            num_eval_samples = len(coco_gt.dataset["images"])
-
-            current_instructions_json = {class_name: current_instructions}
-
-            #Get current seed state - to restore after evaluation - as evaluation changes it
-            seed_state = get_seed_state()
-
-            eval_generator = evaluate_dataset(
-                args, model, processor, dataset_path,
-                no_instructions=False,  # We are using generated instructions
-                few_shot_examples=False, # Few-shot examples were used for definition generation
-                run_name=run_name,
-                output_dir=dataset_result_dir,
-                # dataset_instructions_override_json=current_instructions,
-                dataset_instructions_override_json=current_instructions_json,
-                eval_class_name=class_name,
-                eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
-                # max_samples=None  # Evaluate on the full dataset to get proper metrics
-                # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
-                coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
-                sigclip_pipe=sigclip_pipe
-            )
-
-            #Restore seed state
-            set_seed_from_state(seed_state)
-            
-            all_results_for_iter = []
-            for j, result in enumerate(eval_generator):
-                all_results_for_iter.append(result)
-                
-
-            # --- Display mAP and AR ---
-
-            eval_dir = os.path.join(dataset_result_dir, "evaluations", run_name)
-            eval_results_path = os.path.join(eval_dir, f"evaluation_{dataset_name}.json")
-            if os.path.exists(eval_results_path):
-                with open(eval_results_path, 'r') as f:
-                    all_stats_dict = json.load(f)
-                
-                # Display the primary metrics
-                # ap50_95 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[0]
-                ap50_95 = all_stats_dict.get(stats_type, [0.0]*12)[0]
-                # ar100 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[8]
-                ar1 = all_stats_dict.get(stats_type, [0.0]*12)[6]
-                
-                print(f"Iteration {i} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
-
-                instruction_refinements[f"class_{class_name}_iter_{i}"] = {
-                    "mAP_50_95": ap50_95,
-                    "AR_1": ar1,
-                    "instructions": current_instructions
-                }
-
-                # if ap50_95 > best_mAP:
-                if ap50_95 >= best_mAP:
-                    best_mAP = ap50_95
-                    best_instructions = current_instructions
-
-    
-                if ap50_95 < prev_mAP:
-                    print(f"Iteration {i} - Class '{class_name}': mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}). Reverting to previous instructions.")
-                    current_instructions = prev_instructions
-                    # continue  # Skip to next class without refining
-                else:
-                    prev_instructions = current_instructions
-                    prev_mAP = ap50_95
-                
-
-
-            # stats_type = "orig_with_nms"
+            all_results_for_iter, best_instructions, best_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
+                        model, processor, class_name, cat_id, current_instructions, 
+                        dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
+                        i, instruction_refinements,
+                        best_instructions, best_mAP,
+                        prev_instructions, prev_mAP,
+                        num_samples=None,
+                        stats_type=stats_type
 
             # --- Step 3: Identify worst-performing examples (simplified) ---
             # A simple heuristic: find images with the most false negatives (missed GT objects).
-
-            def get_other_cls_ious(other_cls_gt_bboxes, pred_box):
-
-                #If no other class GT boxes, return zero
-                if len(other_cls_gt_bboxes) == 0:
-                    return 0.0
-                
-                else:
-                    # Calculate IoU for all pairs
-                    other_cls_iou = [utils.calculate_iou(gt_box, pred_box) for gt_box in other_cls_gt_bboxes]
-
-                    # Find best match 
-                    best_other_cls_ious = max(other_cls_iou)
-
-                    return best_other_cls_ious
-
-
-
-            image_pred_performance = []
-            for result in all_results_for_iter:
-
-                gt_bboxes = [ann['bbox'] for ann in result['gt_anns'] if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
-                
-                other_cls_gt_bboxes = [ann['bbox'] for ann in result['gt_anns'] if ann['category_id'] != cat_id] #GRG: GT boxes for other classes
-                
-                
-                # pred_detections = result['all_detections']['vqa_no_nms']
-                pred_detections = result['all_detections'][stats_type] #GRG: Use the same stats type as evaluation
-
-
-                #No predictions - check if there are GT boxes for false negatives
-                if len(pred_detections) == 0:
-
-                    
-                    # If there are GT boxes but no predictions, all are false negatives
-                    if len(gt_bboxes) > 0:
-                        
-                        for gt_bbox in gt_bboxes:
-                            
-                            # fn_error = 1.0
-                            det_score = 0.0
-                            gt_iou = 0.0
-                            best_score = 0.0
-                            other_cls_iou = 0.0
-                            fp_error = 0.0
-
-                            image_pred_performance.append({
-                                    "img_id": result['img_id'], 
-                                    "gt_iou": gt_iou,
-                                    "best_score": best_score, 
-                                    # "fn_error": fn_error,
-                                    "other_cls_iou": other_cls_iou,
-                                    "fp_error": fp_error,
-                                    "image_path": result['image_path'],
-                                    "gt_bbox": gt_bbox,
-                                    "pred_bbox": [],
-                                    "det_score": det_score,
-                                    "det": None,
-                                })
-                            
-                    continue  
-
-
-                for det in pred_detections:
-
-                    if len(gt_bboxes) == 0:
-                        # All predictions are false positives
-                        det_score = det['score']
-                        pred_box = det['bbox']
-                        other_cls_iou = get_other_cls_ious(other_cls_gt_bboxes, pred_box)
-                        # fp_error = det_score * other_cls_iou
-                        fp_error = det_score * max(0.2, other_cls_iou)
-                        gt_iou = 0.0
-                        # best_score = 0.0
-                        best_score = -1.0
-                        # fn_error = 0.0
-                        
-                        
-                        image_pred_performance.append({
-                                "img_id": result['img_id'], 
-                                "gt_iou": gt_iou,
-                                "best_score": best_score, 
-                                # "fn_error": fn_error,
-                                "other_cls_iou": other_cls_iou,
-                                "fp_error": fp_error,
-                                "image_path": result['image_path'],
-                                "gt_bbox": None,
-                                "pred_bbox": pred_box,
-                                "det_score": det_score,
-                                "det": det,
-                            })
-                        continue
-
-                    
-                    #Normal case: There are both GT boxes and predictions
-                
-
-                    # Calculate metrics for each GT box
-                    det_score = det['score']
-                    pred_box = det['bbox']
-
-                    gt_iou_list = [utils.calculate_iou(gt_box, pred_box) for gt_box in gt_bboxes]
-                    gt_bbox = gt_bboxes[np.argmax(gt_iou_list)] #Best matching GT box
-                    gt_iou = max(gt_iou_list) #Best matching GT box IoU
-                    
-                    best_score = det_score * gt_iou
-                    # fn_error = (1 - det_score) * (1 - gt_iou) #TODO-GRG: Consider det_score in FN error?
-                    # fn_error = 1 - gt_iou 
-                    other_cls_iou = get_other_cls_ious(other_cls_gt_bboxes, pred_box)
-                    
-                    if gt_iou > 0.0:
-                        #If this prediction matches a GT box, it cannot be a FP
-                        fp_error = 0.0
-                    else:
-                        # fp_error = det_score * other_cls_iou #We only consider FP error if it matches other class GT boxes - as we can have true det without gt labels as this is few-shot setting
-                        fp_error = det_score * max(0.2, other_cls_iou)
-
-                    image_pred_performance.append({
-                            "img_id": result['img_id'], 
-                            "gt_iou": gt_iou,
-                            "best_score": best_score, 
-                            # "fn_error": fn_error,
-                            "other_cls_iou": other_cls_iou,
-                            "fp_error": fp_error,
-                            "image_path": result['image_path'],
-                            "gt_bbox": gt_bbox,
-                            "pred_bbox": pred_box,
-                            "det_score": det_score,
-                            "det": det,
-                        })
-                    
-                
-
-            # Select one best match, one worst FP, and one worst FN
-            # Randomly choose from the top 3 for each category to introduce diversity
-            top_n = 5 #3
-            best_match_candidates = sorted(image_pred_performance, key=lambda x: x['best_score'], reverse=True)[:top_n]
-            # best_match_candidates = sorted(image_pred_performance, key=lambda x: x['best_score'], reverse=True)
-            best_match_candidates = [c for c in best_match_candidates if c['best_score'] > 0.0] # Only consider truly good matches
-            
-            #Exclude previous best match image if multiple candidates exist
-            if len(best_match_candidates) > 1:
-                best_match_candidates_filterd = [c for c in best_match_candidates if c['img_id'] != prev_worst_examples_map['best_match']['img_id']] if 'best_match' in prev_worst_examples_map and prev_worst_examples_map['best_match'] is not None else best_match_candidates
-                if len(best_match_candidates_filterd) > 0:
-                    best_match_candidates = best_match_candidates_filterd
-
-            worst_fp_candidates = sorted(image_pred_performance, key=lambda x: x['fp_error'], reverse=True)[:top_n]
-            # worst_fp_candidates = sorted(image_pred_performance, key=lambda x: x['fp_error'], reverse=True)
-            worst_fp_candidates = [c for c in worst_fp_candidates if c['fp_error'] > 0.0] # Only consider truly good matches
-            
-            #Exclude previous worst FP if multiple candidates exist
-            if len(worst_fp_candidates) > 1:
-                worst_fp_candidates_filterd = [c for c in worst_fp_candidates if c['img_id'] != prev_worst_examples_map['worst_fp']['img_id']] if 'worst_fp' in prev_worst_examples_map and prev_worst_examples_map['worst_fp'] is not None else worst_fp_candidates
-                if len(worst_fp_candidates_filterd) > 0:
-                    worst_fp_candidates = worst_fp_candidates_filterd
-
-            # worst_fn_candidates = sorted(image_pred_performance, key=lambda x: x['fn_error'], reverse=True)[:top_n]
-            worst_fn_candidates_dict = {}
-            for c in image_pred_performance:
-                # imgs with no GT boxes cannot have false negatives
-                if c['best_score'] == -1.0: 
-                    continue
-
-                #Add FN error 
-                fn_error = 1.0 - c['best_score']
-                c['fn_error'] = fn_error
-
-                key = f"{c['img_id']}_{c['gt_bbox']}"
-
-                if key not in worst_fn_candidates_dict:
-                    worst_fn_candidates_dict[key] = c
-                else:
-                    # Keep the one with higher best score - as this is the matching pred_bbox with gt_box that FN needs to be considered against
-                    if c['best_score'] > worst_fn_candidates_dict[key]['best_score']:
-                        worst_fn_candidates_dict[key] = c
-
-            worst_fn_candidates = sorted(worst_fn_candidates_dict.values(), key=lambda x: x['fn_error'], reverse=True)[:top_n]
-            # worst_fn_candidates = sorted(worst_fn_candidates_dict.values(), key=lambda x: x['fn_error'], reverse=True)
-            worst_fn_candidates = [c for c in worst_fn_candidates if c['fn_error'] > 0.0] # Only consider truly good matches
-
-            #Exclude previous worst FN if multiple candidates exist
-            if len(worst_fn_candidates) > 1:
-                worst_fn_candidates_filterd = [c for c in worst_fn_candidates if c['img_id'] != prev_worst_examples_map['worst_fn']['img_id']] if 'worst_fn' in prev_worst_examples_map and prev_worst_examples_map['worst_fn'] is not None else worst_fn_candidates
-                if len(worst_fn_candidates_filterd) > 0:
-                    worst_fn_candidates = worst_fn_candidates_filterd
-
-            best_match_example = random.choice(best_match_candidates) if len(best_match_candidates) > 0 else None
-            worst_fp_example = random.choice(worst_fp_candidates) if len(worst_fp_candidates) > 0 else None
-            worst_fn_example = random.choice(worst_fn_candidates) if len(worst_fn_candidates) > 0 else None
-
-            # Combine them, ensuring uniqueness
-            worst_examples_map = {
-                'best_match': best_match_example,
-                'worst_fp': worst_fp_example,
-                'worst_fn': worst_fn_example
-            }
-
-            prev_worst_examples_map = worst_examples_map
-            
-            print(f"Worst examples selected for iteration {i+1}, class '{class_name}': \n{worst_examples_map}")
-                     
-            few_shot_examples = {}
-            for idx, (ex_type, ex) in enumerate(worst_examples_map.items()):
-                if ex is None:
-                    print(f"No example found for {ex_type} in iteration {i+1} for class '{class_name}'.")
-                    continue
-
-                img = Image.open(ex['image_path']).convert("RGB")
-                if ex_type == 'best_match':
-                    # if not ex['gt_bbox']: continue
-                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "green", [ex['gt_bbox']])
-                    caption = f"Best Match (score: {ex['best_score']:.2f})"
-                
-                elif ex_type == 'worst_fp':
-                    # if not ex['pred_bbox']: continue
-                    #TODO-GRG: We need to ensure that there aren't any pred boxes that match GT boxes here
-                    #TODO-GRG: We also need to ensure that there aren't any pred boxes that are actually right but shown wrong as the gt label is not there due to few-shot
-
-                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "red", [ex['pred_bbox']])
-                    caption = f"Worst FP (Error: {ex['fp_error']:.2f})"
-                
-                elif ex_type == 'worst_fn':
-                    # if not ex['gt_bbox']: continue
-                    img_with_boxes = utils.draw_colored_bboxes_on_image(img, "blue", [ex['gt_bbox']])
-                    caption = f"Worst FN (Error: {ex['fn_error']:.2f})"
-                
-                else:
-                    print(f"[Warning] Unknown example type: {ex_type} for iteration {i+1}, class '{class_name}' with example: {ex}")
-                    continue
-
-
-                
-                #Resize the image if too large
-                max_dimension = (1920, 1080)  # Example max dimensions (width, height)
-                img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
-                print(f"file_{os.path.basename(ex['image_path'])} resized img.size [org size = {img.size}]: {img_with_boxes.size}")
-                
-                img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_iter{i}_{ex_type}_imId_{ex['img_id']}_caption_{caption}.png")
-                #Save image
-                img_with_boxes.save(img_viz_path)
-
-                # few_shot_examples[ex_type] = {"image_path": img_viz_path}
-                few_shot_examples[ex_type] = img_with_boxes
-
-
+            few_shot_examples, prev_worst_examples_map = method_identify_worst_performing_examples(
+                        all_results_for_iter, cat_id, class_name, dataset_result_dir,
+                        prev_worst_examples_map, stats_type=stats_type)
 
 
             # --- Step 4: Refine prompt for next iteration ---
-            
-            # generated_definition = generate_class_definition(args, model, processor, class_name, current_instructions, few_shot_examples)
-            
-            # Save the analysis text to a file
-            analysis_path = os.path.join(dataset_result_dir, f"{class_name}_analysis_iter_{i}.txt")
-            with open(analysis_path, "w", encoding="utf-8") as f:
-                f.write(f"Analysis for class '{class_name}' at iteration {i+1}:\n\n")
-                f.write(f"Current Instructions:\n{current_instructions}\n\n")
-
-                
-
-            fn_generated_definition, fp_generated_definition = None, None
-            #False-negative focused refinement
-            if 'best_match' in few_shot_examples and 'worst_fn' in few_shot_examples:
-                fn_generated_definition_analysis = generate_class_definition_withFN(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fn'])
-            
-                fn_generated_definition = extract_class_definition(fn_generated_definition_analysis, class_name)
-
-                if fn_generated_definition:
-                    # prev_instructions = current_instructions
-                    current_instructions = fn_generated_definition
-                    
-                    with open(analysis_path, "a", encoding="utf-8") as f:
-                        f.write(f"Generated Analysis for False-Negative based Class Definition:\n{fn_generated_definition_analysis}\n\n")
-
-            #False-positive focused refinement
-            if 'best_match' in few_shot_examples and 'worst_fp' in few_shot_examples:
-                fp_generated_definition_analysis = generate_class_definition_withFP(args, model, processor, class_name, current_instructions, few_shot_examples['best_match'], few_shot_examples['worst_fp'])
-            
-                fp_generated_definition = extract_class_definition(fp_generated_definition_analysis, class_name)
-
-                if fp_generated_definition:
-                    # if not fn_generated_definition: #Only update prev_instructions if FN refinement was not done
-                    #     prev_instructions = current_instructions
-                    current_instructions = fp_generated_definition
-
-                    with open(analysis_path, "a", encoding="utf-8") as f:
-                        f.write(f"Generated Analysis for False-Positive based Class Definition:\n{fp_generated_definition_analysis}\n\n")
-                        f.write(f"Refined Instructions:\n{current_instructions}\n")
-
+            current_instructions = method_refine_prompt(args, model, processor, 
+                        class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = i)
             
             # Display the analysis
             
@@ -1240,14 +1216,12 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
             
 
-
         #Display Initial Instructions
         
         print(f"Initial instructions: \n{initial_instructions}")
 
         #Display Final Refined Instructions
 
-        
         print(f"Final refined instructions: \n{current_instructions}")
 
         #Save final refined instructions
@@ -1359,15 +1333,16 @@ def run_single_dataset_evaluation(args):
 
     args.data_instr_path = os.path.join(args.output_dir, "iterative_prompt_refinement", f"all_refined_class_instructions")
     args.output_dir = os.path.join(args.output_dir, f"final_instruction_eval")
-    evaluator.run_single_dataset_evaluation(args)
+    # evaluator.run_single_dataset_evaluation(args)
+    evaluator.run_single_dataset_evaluation(args, model=model, processor=processor)
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name e.g., Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct]')
-    parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
-    parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
+    # parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
+    # parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
     parser.add_argument("--output_dir", type=str, default="results/rf100vl_IPT/rf20_IPT_singleclass_vqaScore_withNMS", help="Directory to save results and visuals.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")

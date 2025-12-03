@@ -27,7 +27,7 @@ import ipt_utils as utils
 
 
 
-def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_shot_examples=False, 
+def evaluate_dataset(args, model, processor, dataset_path, 
                      run_name="", output_dir="results", max_samples=None, sigclip_pipe=None):
     test_dir = os.path.join(dataset_path, "test")
     ann_path = os.path.join(test_dir, "_annotations.coco.json")
@@ -37,17 +37,6 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
     if not os.path.isfile(ann_path):
         print(f"No test annotations found in {test_dir}, skipping.")
         return None
-    if few_shot_examples:
-        # few_shot_dict = utils.build_few_shot_dict(dataset_path, examples_per_class=2)
-        few_shot_dict = utils.build_few_shot_dict(dataset_path, examples_per_class=10)
-
-        assert sum([len(v) for k,v in few_shot_dict.items()]) == len([f for f in os.listdir(test_dir.replace('test', 'train')) if f.split('.')[-1] in ['.png', 'jpeg', 'jpg']]), "Few-shot examples count does not match number of training images!"
-    
-        few_shot_samples = []
-        [few_shot_samples.extend(v) for k,v in few_shot_dict.items() if len(v) > 0]
-        print(f"Built few-shot examples dictionary with {len(few_shot_dict)} categories and {len(few_shot_samples)} total examples for {dataset_path}.")
-    else:
-        few_shot_dict = None
 
     dataset_instructions_json = {}
     if os.path.isfile(readme_json_path):
@@ -151,14 +140,12 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                 print(f"Image {img_filename} has categories: {[coco_gt.cats[cat_id]['name'] for cat_id in cat_ids_for_image]}")
                 
                 
-                raw_output, few_shot_examples_used, all_detections = utils.run_inference_on_single_image( #grg_changed
+                raw_output, all_detections = utils.run_inference_on_single_image( #grg_changed
                     args,
                     model, processor,
                     image_path=image_path,
                     dataset_instructions_json = dataset_instructions_json,
                     class_name_list=ds_cat_names, #GRG: Pass the entire list of category names
-                    no_instructions=no_instructions,
-                    few_shot_dict=few_shot_dict,
                     output_dir=output_dir,
                     sigclip_pipe=sigclip_pipe,
                 )
@@ -196,7 +183,6 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
                     "parsed_detections": all_detections["vqa_with_nms"],
                     "gt_anns": anns,
                     "cat_dict": cat_dict,
-                    "few_shot_examples_used": few_shot_examples_used,
                 }
 
         del raw_output
@@ -245,7 +231,8 @@ def evaluate_dataset(args, model, processor, dataset_path, no_instructions, few_
 
 
 
-def run_single_dataset_evaluation(args):
+# def run_single_dataset_evaluation(args):
+def run_single_dataset_evaluation(args, model=None, processor=None):
     """
     Runs evaluation for a single dataset. This function is called by the dispatcher.
     """
@@ -280,8 +267,10 @@ def run_single_dataset_evaluation(args):
     # os.makedirs(args.output_dir, exist_ok=True)
 
     print(f"Using model: {args.model_name}")
-
-    model, processor = utils.load_qwen_model(args.model_name)
+    if model is None or processor is None:
+        model, processor = utils.load_qwen_model(args.model_name)
+    else:
+        print("Using provided model and processor.")
 
     if args.siglip_rescore:
         sigclip_pipe = utils.load_sigclip_pipeline()
@@ -291,7 +280,7 @@ def run_single_dataset_evaluation(args):
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
 
-    eval_generator = evaluate_dataset(args, model, processor, dataset_path, no_instructions=args.no_instructions, few_shot_examples=args.few_shot, 
+    eval_generator = evaluate_dataset(args, model, processor, dataset_path, 
                                       run_name=run_name, output_dir=args.output_dir,
                                       sigclip_pipe=sigclip_pipe if args.siglip_rescore else None)
 
@@ -410,8 +399,8 @@ def run_single_dataset_evaluation(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name e.g., Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct]')
-    parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
-    parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
+    # parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
+    # parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
     parser.add_argument("--output_dir", type=str, default="results/rf100vl-zeroshot/rf20_IPT_singleclass_vqaScore_withNMS", help="Directory to save results and visuals.")
     parser.add_argument("--data_instr_path", type=str, default="./data_instr/default/README.dataset", help="Directory to save results and visuals.")
