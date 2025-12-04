@@ -414,7 +414,7 @@ def extract_class_definition(response, class_name):
     return results_str
 
 
-def method_generate_initial_class_definition(args, model, processor, cat_id, class_name, initial_instructions, 
+def method_generate_initial_class_definition(args, model, processor, cat_id, class_name, 
                                              dataset_result_dir, coco_gt, ds_cat_ids, train_dir, 
                                              class_instructions_json):
 
@@ -1122,11 +1122,9 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             continue
 
         # --- Step 0: Generate class definition ---
-        #TODO-GRG: Check if initial definition already exists - then skip generation
-        initial_instructions = class_instructions_json[class_name]
 
         print(f"\n\n\n=== Generating initial class definition for '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ===\n\n\n")
-        initial_instructions = method_generate_initial_class_definition(args, model, processor, cat_id, class_name, initial_instructions, 
+        initial_instructions = method_generate_initial_class_definition(args, model, processor, cat_id, class_name, 
                                              dataset_result_dir, coco_gt, ds_cat_ids, train_dir, 
                                              class_instructions_json)
 
