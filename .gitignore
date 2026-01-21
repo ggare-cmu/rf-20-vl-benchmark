@@ -5,3 +5,7 @@ results/*
 ipt/__pycache__/*
 
 datasets
+
+final_instruction_eval*
+Qwen3-VL-235B-A22B-Instruct-FP8_instructions_serial_/*
+utils/__pycache__/shared_eval_utils.cpython-313.pyc
