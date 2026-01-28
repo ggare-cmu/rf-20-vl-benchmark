@@ -6,13 +6,49 @@ import cv2
 import numpy as np
 import supervision as sv
 import os
+import threading
 from utils.shared_eval_utils import is_rate_limit_error
 from google.genai import types
-MAX_WORKERS = 16
-REQUEST_LIMIT = 9000
+
+MAX_WORKERS = 4 #16
+REQUEST_LIMIT = 1000 #9000
 MAX_RETRIES = 3
 RETRY_DELAY_BASE = 8
 RETRY_DELAY_MAX = 60
+
+# Request statistics tracking (thread-safe)
+_stats_lock = threading.Lock()
+_request_stats = {
+    "total_requests": 0,
+    "successful_requests": 0,
+    "timeout_errors": 0,
+    "rate_limit_errors": 0,
+    "other_errors": 0,
+}
+
+
+def get_request_stats():
+    """Return a copy of current request statistics."""
+    with _stats_lock:
+        return _request_stats.copy()
+
+
+def reset_request_stats():
+    """Reset all request statistics to zero."""
+    with _stats_lock:
+        for key in _request_stats:
+            _request_stats[key] = 0
+
+
+def log_request_stats(logger):
+    """Log current request statistics."""
+    stats = get_request_stats()
+    logger.info(f"Request Stats - Total: {stats['total_requests']}, "
+                f"Success: {stats['successful_requests']}, "
+                f"Timeouts: {stats['timeout_errors']}, "
+                f"Rate limits: {stats['rate_limit_errors']}, "
+                f"Other errors: {stats['other_errors']}")
+
 
 safety_settings = [
     types.SafetySetting(
@@ -177,7 +213,7 @@ def convert_coco_to_gemini_format(bbox, width, height):
     
     return [ymin, xmin, ymax, xmax]
 
-def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter, client):
+def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter, client, json_mode=True):
     """
     Run inference with retry logic for rate limits, accepting the full 'contents' list.
 
@@ -185,6 +221,8 @@ def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter
         contents (list[Content]): The list of Content objects for the API call.
         system_prompt (str): The system instruction for the model.
         model_id (str): The ID of the Gemini model to use.
+        json_mode (bool): If True, force JSON output. If False, allow plain text.
+                          Default True for backward compatibility (detection needs JSON).
 
     Returns:
         tuple[str | None, str | None]: (response_text, error_message)
@@ -193,18 +231,28 @@ def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter
     """
     retries = 0
 
+    # Track total requests
+    with _stats_lock:
+        _request_stats["total_requests"] += 1
+
     while retries <= MAX_RETRIES:
         try:
             rate_limiter()
+
+            # Build config - only include response_mime_type if json_mode is True
+            config_kwargs = {
+                "system_instruction": system_prompt,
+                "temperature": 0.0,
+                "safety_settings": safety_settings,
+                "max_output_tokens": 8192,
+            }
+            if json_mode:
+                config_kwargs["response_mime_type"] = "application/json"
+
             response = client.models.generate_content(
                 model=model_id,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.0,
-                    safety_settings=safety_settings,
-                    max_output_tokens=8192,
-                ),
+                config=types.GenerateContentConfig(**config_kwargs),
             )
 
             response_text = getattr(response, 'text', None)
@@ -218,16 +266,35 @@ def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter
                       logger.error(f"Could not extract text from response parts: {e}. Returning empty.")
                       response_text = ""
 
+            # Track successful request
+            with _stats_lock:
+                _request_stats["successful_requests"] += 1
+
             return response_text, None
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = str(e).lower()
             retries += 1
 
-            error_type = "rate limit" if is_rate_limit_error(error_msg) else "API"
+            # Categorize error type
+            is_timeout = "timeout" in error_msg or "timed out" in error_msg or "deadline" in error_msg
+            is_rate_limit = is_rate_limit_error(str(e))
+
+            if is_timeout:
+                error_type = "timeout"
+                with _stats_lock:
+                    _request_stats["timeout_errors"] += 1
+            elif is_rate_limit:
+                error_type = "rate limit"
+                with _stats_lock:
+                    _request_stats["rate_limit_errors"] += 1
+            else:
+                error_type = "API"
+                with _stats_lock:
+                    _request_stats["other_errors"] += 1
 
             if retries > MAX_RETRIES:
-                error_detail = f"{error_type.capitalize()} error exceeded after {MAX_RETRIES} retries: {error_msg}"
+                error_detail = f"{error_type.capitalize()} error exceeded after {MAX_RETRIES} retries: {e}"
                 logger.warning(f"{error_detail[:500]}...")
                 return None, error_detail
 
@@ -235,7 +302,7 @@ def inference_with_retry(contents, system_prompt, model_id, logger, rate_limiter
             jitter = random.uniform(0, 0.1 * delay)
             wait_time = delay + jitter
 
-            logger.info(f"{error_type.capitalize()} error encountered. Retry {retries}/{MAX_RETRIES} after {wait_time:.2f}s. Details: {error_msg[:200]}...")
+            logger.info(f"{error_type.capitalize()} error encountered. Retry {retries}/{MAX_RETRIES} after {wait_time:.2f}s. Details: {str(e)[:200]}...")
             time.sleep(wait_time)
 
     return None, "Maximum retries exceeded without specific error capture (logic error)"
