@@ -457,6 +457,22 @@ def apply_nms(detections, iou_threshold=0.5):
 
 
 
+def assign_score_based_on_ranking(ranked_detections, max_score=1.0, min_score=0.1):
+    """
+    Assigns a confidence score to each detection based on its rank.
+    The highest-ranked detection gets max_score, the lowest gets min_score, and others are scaled in between.
+    """
+    if not ranked_detections:
+        return []
+    
+    num_detections = len(ranked_detections)
+
+    for i, det in enumerate(ranked_detections):
+        # Linear scaling of score based on rank
+        det['score'] = max_score - (max_score - min_score) * (i / (num_detections - 1)) if num_detections > 1 else max_score
+
+    return ranked_detections
+
 
 def run_qwen_inference(args, model, processor, image, dataset_instructions, class_name):
     """
@@ -476,53 +492,93 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     #     f"Locate all of the following objects: {class_name} in the image and output the coordinates in JSON format.\n\nUse the following annotator instructions to improve detection accuracy:\n{dataset_instructions}\n\nReturn a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"score\":*confidence_score 0-1*}}."
 
     # )
-    
-    prompt_text = (
-    f"""
-        Follow the steps outlined in the pseudo code below on this image for object detection. 
-        Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
 
-        Do NOT return code or explanations — only output the final JSON list of bounding boxes.
+    # prompt_text = (
+    #     f"Locate all of the following objects: {class_name} in the image and output the coordinates in JSON format. Return the most confident bounding box detections as a ranked list (maximum 20 items) sorted by confidence (highest first). Also, rate the confidence of detection on a scale of 1 to 5.\n\nUse the following annotator instructions to improve detection accuracy:\n{dataset_instructions}\n\nReturn a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"rating\":*confidence_rating 1-5*}}."
+    # )
+
+    prompt_text = (
+        f"""
+            Identify and localize all instances of "{class_name}" in the image.
+
+            Output Requirements:
+            - Return valid JSON only. Do not include explanations or extra text.
+            - Output a ranked list of detections sorted by confidence (highest first).
+            - Include at most 20 detections.
+            - If no objects are detected, return an empty list [].
+
+            For each detection, provide:
+            - "bbox_2d": [x1, y1, x2, y2]
+                * Pixel coordinates.
+                * (x1, y1) = top-left corner.
+                * (x2, y2) = bottom-right corner.
+            - "label": "{class_name}"
+            - "rating": integer confidence rating from 1 (lowest) to 5 (highest).
+
+            Additional Constraints:
+            - Only include detections that clearly correspond to "{class_name}".
+            - Avoid duplicate or highly overlapping boxes for the same object.
+            - Follow these annotator instructions to improve detection accuracy:
+
+            {dataset_instructions}
+
+            Return a JSON list in the following format:
+            [
+            {{
+                "bbox_2d": [x1, y1, x2, y2],
+                "label": "{class_name}",
+                "rating": 5
+            }}
+            ]
+            """
+    )
+
+    # prompt_text = (
+    # f"""
+    #     Follow the steps outlined in the pseudo code below on this image for object detection. 
+    #     Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
+
+    #     Do NOT return code or explanations — only output the final JSON list of bounding boxes.
 
         
-        Pseudo code for reference:
-        INPUT:
-            - image
-            - class_list = [{class_name}]  # list of classes to detect
+    #     Pseudo code for reference:
+    #     INPUT:
+    #         - image
+    #         - class_list = [{class_name}]  # list of classes to detect
 
-        PROCESS:
-            detections = []  # initialize empty list for detected objects
+    #     PROCESS:
+    #         detections = []  # initialize empty list for detected objects
 
-            for each class_name in class_list:
-                # Step 1: Scan the image at multiple scales to detect both large and tiny objects
-                multi_scale_regions = model.predict_regions_multiscale(image, class_name)
+    #         for each class_name in class_list:
+    #             # Step 1: Scan the image at multiple scales to detect both large and tiny objects
+    #             multi_scale_regions = model.predict_regions_multiscale(image, class_name)
 
-                # Step 2: For each candidate region, get bounding box and initial confidence score
-                for region in multi_scale_regions:
-                    bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
-                    bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
-                    class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
+    #             # Step 2: For each candidate region, get bounding box and initial confidence score
+    #             for region in multi_scale_regions:
+    #                 bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
+    #                 bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
+    #                 class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
 
-                    # Step 3: Combine both scores for final confidence
-                    # - This ensures the score reflects both detection quality and label match
-                    calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
+    #                 # Step 3: Combine both scores for final confidence
+    #                 # - This ensures the score reflects both detection quality and label match
+    #                 calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
 
 
-                    # Step 4: Include even small objects (tiny bounding boxes)
-                    detections.append({{
-                        "bbox_2d": bbox,
-                        "label": class_name,
-                        "score": calibrated_score
-                    }})
+    #                 # Step 4: Include even small objects (tiny bounding boxes)
+    #                 detections.append({{
+    #                     "bbox_2d": bbox,
+    #                     "label": class_name,
+    #                     "score": calibrated_score
+    #                 }})
 
-            # Optional: sort detections by score descending
-            detections.sort(key=lambda x: x['score'], reverse=True)
+    #         # Optional: sort detections by score descending
+    #         detections.sort(key=lambda x: x['score'], reverse=True)
 
-        OUTPUT:
-            Return the 'detections' list in JSON format
+    #     OUTPUT:
+    #         Return the 'detections' list in JSON format
 
-    """    
-    )
+    # """    
+    # )
 
     
     messages = [
