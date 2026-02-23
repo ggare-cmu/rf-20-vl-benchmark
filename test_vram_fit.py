@@ -9,7 +9,7 @@ from vllm import LLM, SamplingParams
 model_name = sys.argv[1] if len(sys.argv) > 1 else "Qwen3-VL-30B-A3B-Instruct"
 
 print(f"GPU: {torch.cuda.get_device_name(0)}")
-print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 print(f"Model: {model_name}")
 print()
 
