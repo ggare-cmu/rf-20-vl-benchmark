@@ -3,19 +3,19 @@ Rescore Gemini predictions using Qwen VLM in two steps:
   Step 1: 1-5 quality rating with logit-based confidence extraction (NEW)
   Step 2: VQA Yes/No rescore (REUSED identically from ipt_utils.py)
 
-Each step saves results in dbl_eval.py-compatible layout:
-  <output_dir>_step1_rating/results/actions/gemini_detection_results.json
-  <output_dir>_step2_vqa/results/actions/gemini_detection_results.json
+Downloads predictions from GCS, rescores, uploads results back as sibling folders.
+
+Given:  gs://rf-detr-rf100-vl/gemini3_reg_preds_ranked/results/actions
+Output: gs://rf-detr-rf100-vl/gemini3_reg_preds_ranked_step1_rating/results/actions/gemini_detection_results.json
+        gs://rf-detr-rf100-vl/gemini3_reg_preds_ranked_step2_vqa/results/actions/gemini_detection_results.json
 
 Usage:
   python rescore_gemini_preds.py \
     --model_name Qwen2.5-VL-7B-Instruct \
-    --predictions_json /home/matveipopov/rf-20-vl-benchmark/gemini3_reg_preds_ranked/results/actions/gemini_detection_results.json \
+    --gcs_input gs://rf-detr-rf100-vl/gemini3_reg_preds_ranked/results/actions \
     --images_dir /home/matveipopov/rf-20-vl-benchmark/rf20-vl-fsod/actions/test \
     --gt_json /home/matveipopov/rf-20-vl-benchmark/rf20-vl-fsod/actions/test/_annotations.coco.json \
-    --instructions_json data_instr/default/README.dataset_actions.json \
-    --dataset_name actions \
-    --output_dir rescored_results
+    --instructions_json data_instr/default/README.dataset_actions.json
 """
 
 import os
@@ -24,6 +24,8 @@ os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 import sys
 import json
 import argparse
+import subprocess
+import tempfile
 import numpy as np
 import torch
 from PIL import Image
@@ -63,16 +65,13 @@ def get_rating_logit_scores(qwen_model, qwen_processor, dataset_instructions_jso
         raise ValueError(f"Class name '{class_name}' not found in dataset instructions JSON keys.")
 
     def getRatingPrompt(prompt, dataset_instructions_json):
-        return f"""Given the '{prompt}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, prompt)}
+        return f"""
+            Given the '{prompt}' class defined as follows: {getDatasetInstructions(dataset_instructions_json, prompt)}
 
-How well does the object inside the red bounding box match the class '{prompt}'? Rate the quality of this detection on a scale of 1 to 5, where:
-1 = Not at all (wrong object or empty box)
-2 = Poor match (partially visible or very unclear)
-3 = Moderate match (somewhat matches but uncertain)
-4 = Good match (clearly the right object)
-5 = Excellent match (perfect detection)
+            Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Rate your confidence from 1 (lowest) to 5 (highest). Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box.
 
-Answer with a single number from 1 to 5."""
+            Answer with a single number from 1 to 5.
+        """
 
     digit_tokens = ["1", "2", "3", "4", "5"]
     all_scores = []
@@ -138,26 +137,61 @@ def save_coco_predictions(predictions, scores, output_path):
     print(f"  Saved {len(coco_preds)} predictions to {output_path}")
 
 
+def gsutil_run(cmd_args):
+    """Run a gsutil command, print errors, return success bool."""
+    print(f"  $ {' '.join(cmd_args)}")
+    result = subprocess.run(cmd_args, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"  [ERR] {result.stderr.strip()}")
+    return result.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Rescore Gemini predictions with Qwen (1-5 rating + VQA)")
     parser.add_argument("--model_name", type=str, default="Qwen2.5-VL-7B-Instruct")
-    parser.add_argument("--predictions_json", type=str, required=True,
-                        help="Path to gemini_detection_results.json")
+    parser.add_argument("--gcs_input", type=str, required=True,
+                        help="GCS folder with gemini_detection_results.json, e.g. gs://rf-detr-rf100-vl/gemini3_reg_preds_ranked/results/actions")
     parser.add_argument("--images_dir", type=str, required=True,
-                        help="Path to test images folder")
+                        help="Path to local test images folder")
     parser.add_argument("--gt_json", type=str, required=True,
                         help="Path to _annotations.coco.json")
     parser.add_argument("--instructions_json", type=str, required=True,
                         help="Path to dataset instructions JSON")
-    parser.add_argument("--dataset_name", type=str, default="actions",
-                        help="Dataset name (used for output folder structure)")
-    parser.add_argument("--output_dir", type=str, default="rescored_results",
-                        help="Base output directory")
     args = parser.parse_args()
+
+    # ---- Parse GCS path ----
+    # Input:  gs://bucket/run_name/results/dataset_name
+    # Output: gs://bucket/run_name_step1_rating/results/dataset_name/gemini_detection_results.json
+    #         gs://bucket/run_name_step2_vqa/results/dataset_name/gemini_detection_results.json
+    gcs_input = args.gcs_input.rstrip('/')
+    parts = gcs_input.replace("gs://", "").split("/")
+    bucket = f"gs://{parts[0]}"
+
+    try:
+        results_idx = parts.index("results")
+    except ValueError:
+        print("[ERR] Expected 'results' in GCS path, e.g. gs://bucket/run_name/results/dataset_name")
+        return
+
+    run_name = "/".join(parts[1:results_idx])       # e.g. "gemini3_reg_preds_ranked"
+    dataset_name = "/".join(parts[results_idx + 1:]) # e.g. "actions"
+
+    print(f"  Bucket:   {bucket}")
+    print(f"  Run name: {run_name}")
+    print(f"  Dataset:  {dataset_name}")
+
+    # ---- Download predictions from GCS ----
+    local_tmp = tempfile.mkdtemp(prefix="rescore_")
+    local_pred_json = os.path.join(local_tmp, "gemini_detection_results.json")
+    gcs_pred_json = f"{gcs_input}/gemini_detection_results.json"
+
+    print(f"\nDownloading {gcs_pred_json}...")
+    if not gsutil_run(["gsutil", "cp", gcs_pred_json, local_pred_json]):
+        return
 
     # ---- Load data ----
     print("Loading predictions...")
-    with open(args.predictions_json, 'r') as f:
+    with open(local_pred_json, 'r') as f:
         predictions = json.load(f)
     print(f"  {len(predictions)} predictions loaded")
 
@@ -212,15 +246,19 @@ def main():
         for i, r in enumerate(rating_scores_raw)
     ])
 
-    print(f"  Raw rating scores: min={rating_scores_raw[rating_scores_raw != -1.0].min():.3f}, "
-          f"max={rating_scores_raw[rating_scores_raw != -1.0].max():.3f}, "
-          f"mean={rating_scores_raw[rating_scores_raw != -1.0].mean():.3f}, "
-          f"num_failed={np.sum(rating_scores_raw == -1.0)}")
+    valid_mask = rating_scores_raw != -1.0
+    print(f"  Raw rating scores: min={rating_scores_raw[valid_mask].min():.3f}, "
+          f"max={rating_scores_raw[valid_mask].max():.3f}, "
+          f"mean={rating_scores_raw[valid_mask].mean():.3f}, "
+          f"num_failed={np.sum(~valid_mask)}")
 
-    # Save Step 1 in dbl_eval.py layout: <output_dir>_step1_rating/results/<dataset>/gemini_detection_results.json
-    step1_dir = f"{args.output_dir}_step1_rating"
-    step1_path = os.path.join(step1_dir, "results", args.dataset_name, "gemini_detection_results.json")
-    save_coco_predictions(predictions, rating_scores_norm, step1_path)
+    # Save Step 1 locally & upload
+    step1_local = os.path.join(local_tmp, "step1", "gemini_detection_results.json")
+    save_coco_predictions(predictions, rating_scores_norm, step1_local)
+
+    step1_gcs = f"{bucket}/{run_name}_step1_rating/results/{dataset_name}/gemini_detection_results.json"
+    print(f"\n  Uploading Step 1 -> {step1_gcs}")
+    gsutil_run(["gsutil", "cp", step1_local, step1_gcs])
 
     # ==== Step 2: VQA Yes/No Rescore (REUSED identically from ipt_utils) ====
     print("\n=== Step 2: VQA Yes/No Rescore ===")
@@ -236,19 +274,23 @@ def main():
         for i in range(len(predictions))
     ])
 
-    print(f"  VQA scores: min={vqa_scores[vqa_scores != -1.0].min():.3f}, "
-          f"max={vqa_scores[vqa_scores != -1.0].max():.3f}, "
-          f"mean={vqa_scores[vqa_scores != -1.0].mean():.3f}, "
-          f"num_failed={np.sum(vqa_scores == -1.0)}")
+    vqa_valid_mask = vqa_scores != -1.0
+    print(f"  VQA scores: min={vqa_scores[vqa_valid_mask].min():.3f}, "
+          f"max={vqa_scores[vqa_valid_mask].max():.3f}, "
+          f"mean={vqa_scores[vqa_valid_mask].mean():.3f}, "
+          f"num_failed={np.sum(~vqa_valid_mask)}")
 
-    # Save Step 2 in dbl_eval.py layout: <output_dir>_step2_vqa/results/<dataset>/gemini_detection_results.json
-    step2_dir = f"{args.output_dir}_step2_vqa"
-    step2_path = os.path.join(step2_dir, "results", args.dataset_name, "gemini_detection_results.json")
-    save_coco_predictions(predictions, final_scores, step2_path)
+    # Save Step 2 locally & upload
+    step2_local = os.path.join(local_tmp, "step2", "gemini_detection_results.json")
+    save_coco_predictions(predictions, final_scores, step2_local)
 
-    print(f"\nDone! To evaluate with dbl_eval.py:")
-    print(f"  Step 1 only:  python /home/matveipopov/rf-20-vl-benchmark/dbl_eval.py --predictions_root {step1_dir} --model_name qwen_rating")
-    print(f"  Step 1 + 2:   python /home/matveipopov/rf-20-vl-benchmark/dbl_eval.py --predictions_root {step2_dir} --model_name qwen_vqa")
+    step2_gcs = f"{bucket}/{run_name}_step2_vqa/results/{dataset_name}/gemini_detection_results.json"
+    print(f"\n  Uploading Step 2 -> {step2_gcs}")
+    gsutil_run(["gsutil", "cp", step2_local, step2_gcs])
+
+    print(f"\nDone!")
+    print(f"  Step 1 (rating): {step1_gcs}")
+    print(f"  Step 2 (vqa):    {step2_gcs}")
 
 
 if __name__ == "__main__":
