@@ -34,12 +34,40 @@ from pycocotools.coco import COCO
 
 # Reuse everything from ipt_utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ipt'))
+from vllm import LLM, SamplingParams
+from transformers import AutoProcessor
 from ipt_utils import (
     load_qwen_model,
     model_generate_with_scores,
     create_img_with_bbox,
     get_masked_image_vqa_scores_with_instructions,
 )
+
+
+def load_qwen_model_with_max_len(model_name, max_model_len=None):
+    """Same as load_qwen_model from ipt_utils but with max_model_len support."""
+    dtype = "auto" if "-FP8" in model_name else torch.bfloat16
+    enable_expert_parallel = model_name.startswith("Qwen3-VL-235B-A22B-Instruct-FP8") or model_name.startswith("Qwen3-VL-30B-A3B-Instruct")
+    tensor_parallel_size = 4 if model_name.startswith("Qwen2.5-VL-7B") else torch.cuda.device_count()
+
+    print(f"  dtype: {dtype}, expert_parallel: {enable_expert_parallel}, tp: {tensor_parallel_size}, max_model_len: {max_model_len}")
+
+    kwargs = dict(
+        model="Qwen/" + model_name,
+        dtype=dtype,
+        trust_remote_code=True,
+        gpu_memory_utilization=0.90,
+        enforce_eager=False,
+        enable_expert_parallel=enable_expert_parallel,
+        tensor_parallel_size=tensor_parallel_size,
+        seed=0,
+    )
+    if max_model_len is not None:
+        kwargs["max_model_len"] = max_model_len
+
+    model = LLM(**kwargs)
+    processor = AutoProcessor.from_pretrained("Qwen/" + model_name)
+    return model, processor
 
 
 # ---- Step 1: NEW function ----
@@ -157,6 +185,8 @@ def main():
                         help="Path to _annotations.coco.json")
     parser.add_argument("--instructions_json", type=str, required=True,
                         help="Path to dataset instructions JSON")
+    parser.add_argument("--max_model_len", type=int, default=4096,
+                        help="Max sequence length for vLLM KV cache (input+output tokens)")
     args = parser.parse_args()
 
     # ---- Parse GCS path ----
@@ -206,9 +236,9 @@ def main():
         dataset_instructions = json.load(f)
     print(f"  Instruction keys: {list(dataset_instructions.keys())}")
 
-    # ---- Load Qwen model (reuse load_qwen_model from ipt_utils) ----
-    print(f"\nLoading Qwen model: {args.model_name}...")
-    qwen_model, qwen_processor = load_qwen_model(args.model_name)
+    # ---- Load Qwen model ----
+    print(f"\nLoading Qwen model: {args.model_name} (max_model_len={args.max_model_len})...")
+    qwen_model, qwen_processor = load_qwen_model_with_max_len(args.model_name, max_model_len=args.max_model_len)
     print("  Model loaded.")
 
     # ---- Prepare per-detection images (reuse create_img_with_bbox from ipt_utils) ----
