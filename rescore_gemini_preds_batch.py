@@ -4,8 +4,9 @@ Batch rescore Gemini predictions using Qwen VLM across all datasets in a GCS exp
 For each dataset found under --gcs_experiment/results/<dataset_name>/:
   - Downloads gemini_detection_results.json
   - Resolves local images from --datasets_root/<dataset_name>/test/
-  - Resolves IPT instructions from --instructions_root/<dataset_name>/all_refined_class_instructions_<dataset_name>.json
-    (falls back to data_instr/default/README.dataset_<dataset_name>.json if not found)
+  - Downloads IPT instructions from GCS:
+      --gcs_instructions/<dataset_name>/all_refined_class_instructions_<dataset_name>.json
+    (falls back to local data_instr/default/README.dataset_<dataset_name>.json if not found)
   - Runs Step 2 (1-5 rating) and Step 3 (VQA rescore on Step 2 results)
   - Uploads results to GCS as sibling folders (_step2_rating, _step3_vqa)
 
@@ -14,7 +15,7 @@ Usage:
     --model_name Qwen3-VL-30B-A3B-Instruct \
     --gcs_experiment gs://rf-detr-rf100-vl/gemini_final_experiments/gemini3_ipt_fewshot \
     --datasets_root rf20-vl-fsod \
-    --instructions_root gemini3_new_method \
+    --gcs_instructions gs://rf-detr-rf100-vl/gemini_final_experiments/gemini3_ipt_fewshot_checkpoints/gemini3_new_method \
     --max_model_len 16384
 """
 
@@ -75,34 +76,35 @@ def discover_datasets(gcs_experiment):
     return datasets
 
 
-def resolve_instructions(instructions_root, dataset_name):
+def resolve_instructions(gcs_instructions, dataset_name, local_tmp_root):
     """
-    Find the instructions JSON for a dataset. Tries in order:
-      1. instructions_root/<dataset_name>/all_refined_class_instructions_<dataset_name>.json
-      2. instructions_root/<dataset_name>/all_refined_class_instructions.json
-      3. data_instr/default/README.dataset_<dataset_name>.json
-    Returns path if found, None otherwise.
+    Find and download instructions JSON for a dataset. Tries in order:
+      1. GCS: gcs_instructions/<dataset_name>/all_refined_class_instructions_<dataset_name>.json
+      2. GCS: gcs_instructions/<dataset_name>/all_refined_class_instructions.json
+      3. Local fallback: data_instr/default/README.dataset_<dataset_name>.json
+    Returns local path if found, None otherwise.
     """
-    if instructions_root:
-        candidate1 = os.path.join(
-            instructions_root, dataset_name,
-            f"all_refined_class_instructions_{dataset_name}.json"
-        )
-        if os.path.isfile(candidate1):
-            return candidate1
+    if gcs_instructions:
+        gcs_base = gcs_instructions.rstrip('/')
+        candidates_gcs = [
+            f"{gcs_base}/{dataset_name}/all_refined_class_instructions_{dataset_name}.json",
+            f"{gcs_base}/{dataset_name}/all_refined_class_instructions.json",
+        ]
+        for gcs_path in candidates_gcs:
+            local_path = os.path.join(local_tmp_root, f"instructions_{dataset_name}.json")
+            result = subprocess.run(
+                ["gsutil", "cp", gcs_path, local_path],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                return local_path
 
-        candidate2 = os.path.join(
-            instructions_root, dataset_name,
-            "all_refined_class_instructions.json"
-        )
-        if os.path.isfile(candidate2):
-            return candidate2
-
-    candidate3 = os.path.join(
+    # Local fallback
+    candidate_local = os.path.join(
         "data_instr", "default", f"README.dataset_{dataset_name}.json"
     )
-    if os.path.isfile(candidate3):
-        return candidate3
+    if os.path.isfile(candidate_local):
+        return candidate_local
 
     return None
 
@@ -258,8 +260,8 @@ def main():
                         help="GCS experiment folder, e.g. gs://rf-detr-rf100-vl/gemini_final_experiments/gemini3_ipt_fewshot")
     parser.add_argument("--datasets_root", type=str, required=True,
                         help="Local root for datasets, e.g. rf20-vl-fsod")
-    parser.add_argument("--instructions_root", type=str, default=None,
-                        help="Local root for IPT instructions, e.g. gemini3_new_method")
+    parser.add_argument("--gcs_instructions", type=str, default=None,
+                        help="GCS root for IPT instructions, e.g. gs://rf-detr-rf100-vl/gemini_final_experiments/gemini3_ipt_fewshot_checkpoints/gemini3_new_method")
     parser.add_argument("--max_model_len", type=int, default=16384,
                         help="Max sequence length for vLLM KV cache")
     args = parser.parse_args()
@@ -274,11 +276,13 @@ def main():
         return
 
     # ---- Validate all datasets before loading model ----
+    # Download instructions to a shared temp dir
+    instructions_tmp = tempfile.mkdtemp(prefix="batch_instructions_")
     valid_datasets = []
     for dataset_name in datasets:
         images_dir = os.path.join(args.datasets_root, dataset_name, "test")
         gt_json = os.path.join(args.datasets_root, dataset_name, "test", "_annotations.coco.json")
-        instructions = resolve_instructions(args.instructions_root, dataset_name)
+        instructions = resolve_instructions(args.gcs_instructions, dataset_name, instructions_tmp)
 
         if not os.path.isdir(images_dir):
             print(f"  [SKIP] {dataset_name} — images dir not found: {images_dir}")
