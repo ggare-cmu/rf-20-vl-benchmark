@@ -52,8 +52,9 @@ def set_seed_from_state(seed_state):
 def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_dir="results", 
                      eval_class_name=None, eval_cat_id=None, 
                      max_samples=None, 
-                     dataset_instructions_json=None, coco_override=None, sigclip_pipe=None):
-    train_dir = os.path.join(dataset_path, "train")
+                     dataset_instructions_json=None, coco_override=None, sigclip_pipe=None, dataset_type="train"):
+    # train_dir = os.path.join(dataset_path, "train")
+    train_dir = os.path.join(dataset_path, dataset_type)
     ann_path = os.path.join(train_dir, "_annotations.coco.json")
     
 
@@ -378,6 +379,64 @@ def generate_class_definition_withFN(args, model, processor, class_name, current
     return definition
 
 
+
+
+def generate_refined_class_definition(args, model, processor, class_name, best_instructions):
+    """
+    Uses the VLM to generate an initial textual definition of a class based on all GT examples.
+    """
+
+    utils.set_seed(args.seed)
+
+    content = [
+        {"type": "text", "text": 
+       
+        # f"""
+        #     Refine the following class definition of the '{class_name}' class. 
+
+        #     Your goal is to produce a concise, clear, detailed, and generalizable definition that enables accurate recognition of this object class in future images and makes it easily distinguishable from other objects. 
+
+        #     Current class definition of the '{class_name}' class:
+        #     \n{best_instructions}\n
+
+        #     Note: Do not mention bounding boxes, colors, or image annotations in your response. The updated class definition should be a textual description of the '{class_name}' class objects.
+            
+        #     Return the final updated class definition as descriptive text in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
+        # """
+
+        f"""
+            Refine the class definition for the '{class_name}' category.
+
+            Objective:
+            Produce a concise, precise, and generalizable definition that enables reliable recognition of '{class_name}' instances across diverse images. The definition should clearly distinguish this class from visually or functionally similar object categories.
+
+            Current definition:
+            {best_instructions}
+
+            Guidelines:
+            - Focus on intrinsic, stable characteristics such as structure, shape, components, function, and typical physical configuration.
+            - Ensure the description is detailed enough for accurate visual identification, yet broadly applicable across variations.
+            - Do NOT mention bounding boxes, colors, image annotations, or dataset-specific context.
+            - Avoid referencing specific images or examples.
+            - Output only a textual class definition.
+
+            Return the result strictly in the following format: ```python\n{{'{class_name}': <updated definition>}}\n```.
+        """
+        },
+    ]
+    
+
+    messages = [{"role": "user", "content": content}]
+   
+    definition, _ = utils.model_generate(messages, model, processor)
+    print(f"Generated refined definition for '{class_name}': {definition}")
+
+    refined_instruction = extract_class_definition(definition, class_name)
+    
+    return refined_instruction
+
+
+
 import re
 import json
 import ast
@@ -627,7 +686,7 @@ def method_generate_initial_class_definition(args, model, processor, cat_id, cla
     
 
 def method_evaluate_current_instructions(args, model, processor, class_name, cat_id, current_instructions, 
-                                  dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
+                                  dataset_name, dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
                                   i, instruction_refinements,
                                   best_instructions, best_mAP,
                                   prev_instructions, prev_mAP,
@@ -656,7 +715,8 @@ def method_evaluate_current_instructions(args, model, processor, class_name, cat
         run_name=run_name,
         output_dir=dataset_result_dir,
         # dataset_instructions_override_json=current_instructions,
-        dataset_instructions_override_json=current_instructions_json,
+        # dataset_instructions_override_json=current_instructions_json,
+        dataset_instructions_json=current_instructions_json, 
         eval_class_name=class_name,
         eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
         # max_samples=None  # Evaluate on the full dataset to get proper metrics
@@ -709,12 +769,12 @@ def method_evaluate_current_instructions(args, model, processor, class_name, cat
             prev_instructions = current_instructions
             prev_mAP = ap50_95
         
-
+        current_mAP = ap50_95
 
     # stats_type = "orig_with_nms"
 
 
-    return all_results_for_iter, best_instructions, best_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements
+    return all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements
 
 
 def method_identify_worst_performing_examples(all_results_for_iter, cat_id, class_name, dataset_result_dir,
@@ -1012,6 +1072,96 @@ def method_refine_prompt(args, model, processor, class_name, current_instruction
     return current_instructions
 
 
+def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, sigclip_pipe, stats_type):
+
+    # Original dataset instructions path - default from dataset README 
+    org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
+    with open(org_instructions_path, "r", encoding="utf-8") as f:
+        original_instructions = f.read()
+    
+    # Inital instructions path - without active IPT refinements - only with manual GT and FN images
+    init_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_initial_definition.txt")
+    with open(init_instructions_path, "r", encoding="utf-8") as f:
+        initial_instructions = f.read()
+
+    # Final instructions path - with active IPT refinements
+    final_refined_instructions_path = os.path.join(dataset_result_dir, f"refined_instructions_{dataset_name}_cls_{class_name}.txt")
+    with open(final_refined_instructions_path, "r", encoding="utf-8") as f:
+        final_refined_instructions = f.read()
+
+    best_instructions_path = os.path.join(dataset_result_dir, f"best_instructions_{dataset_name}_cls_{class_name}.txt")
+    with open(best_instructions_path, "r", encoding="utf-8") as f:
+        valSet_best_instructions = f.read()
+
+    # Generate and refine the best instruction 
+    altered_best_instruction = generate_refined_class_definition(args, model, processor, class_name, valSet_best_instructions)
+
+    # Evaluate original, initial, best, and final refined instructions
+    valSet_best_mAP = -1.0
+    valSet_instruction_eval_result = {}    
+    for instr, instr_name in zip([original_instructions, initial_instructions, valSet_best_instructions, final_refined_instructions, altered_best_instruction],
+                                ["original_instructions", "initial_instructions", "best_instructions", "final_refined_instructions", "altered_best_instruction"]):
+
+        run_name = f"class_{class_name}_instr_name_{instr_name}"
+        results_dir = f"{dataset_result_dir}_class_{class_name}_{instr_name}_valSet_eval"
+        
+
+        current_instructions_json = {class_name: instr}
+
+        #Get current seed state - to restore after evaluation - as evaluation changes it
+        seed_state = get_seed_state()
+
+        eval_generator = evaluate_dataset(
+            args, model, processor, dataset_path,
+            run_name=run_name,
+            output_dir=results_dir,
+            dataset_instructions_json=current_instructions_json, 
+            eval_class_name=class_name,
+            eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
+            sigclip_pipe=sigclip_pipe,
+            dataset_type="valid"
+        )
+
+        #Restore seed state
+        set_seed_from_state(seed_state)
+        
+        all_results_for_iter = []
+        for j, result in enumerate(eval_generator):
+            all_results_for_iter.append(result)
+            
+
+        # --- Display mAP and AR ---
+
+        eval_dir = os.path.join(results_dir, "evaluations", run_name)
+        eval_results_path = os.path.join(eval_dir, f"evaluation_{dataset_name}.json")
+        if os.path.exists(eval_results_path):
+            with open(eval_results_path, 'r') as f:
+                all_stats_dict = json.load(f)
+            
+            # Display the primary metrics
+            # ap50_95 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[0]
+            ap50_95 = all_stats_dict.get(stats_type, [0.0]*12)[0]
+            # ar100 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[8]
+            ar1 = all_stats_dict.get(stats_type, [0.0]*12)[6]
+            
+            print(f"Instruction {instr_name} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
+
+            valSet_instruction_eval_result[f"class_{class_name}_{instr_name}"] = {
+                "mAP_50_95": ap50_95,
+                "AR_1": ar1,
+                "instructions": instr
+            }
+
+            # if ap50_95 > best_mAP:
+            if ap50_95 >= valSet_best_mAP:
+                valSet_best_mAP = ap50_95
+                valSet_best_instructions = instr
+
+
+    return valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP
+
+
+     
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
                                     num_samples=None, sigclip_pipe=None):
     
@@ -1034,6 +1184,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         with open(readme_json_path, "r", encoding="utf-8") as f:
             class_instructions_json = json.load(f)
 
+    default_class_instructions_json = class_instructions_json.copy()
 
     #Get all category ids
     train_dir = os.path.join(dataset_path, "train")
@@ -1165,11 +1316,12 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             print(f"All {num_iterations} iterations already completed for class '{class_name}'. Skipping.")
             continue
 
+        
+        iter_instructions = "" #No iter instru at index-0 as we haven't done any iterations yet 
 
+        for iter in range(start_iteration, num_iterations+1):
 
-        for i in range(start_iteration, num_iterations):
-
-            print(f"\n\n\n--- Iteration {i} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
+            print(f"\n\n\n--- Iteration {iter} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
 
             # stats_type = "vqa_with_nms"
             stats_type = "vqa_no_nms"
@@ -1177,15 +1329,39 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
             # --- Step 2: Evaluate with the current prompt ---
-            all_results_for_iter, best_instructions, best_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
+            all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
                         model, processor, class_name, cat_id, current_instructions, 
-                        dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
-                        i, instruction_refinements,
+                        dataset_name, dataset_path, f"{dataset_result_dir}_iter{iter}", coco_gt, sigclip_pipe,
+                        iter, instruction_refinements,
                         best_instructions, best_mAP,
                         prev_instructions, prev_mAP,
                         num_samples=None,
                         stats_type=stats_type
             )
+
+            # Display the analysis
+            
+            # --- Iteration-level Save for Resume ---
+            print(f"Finished iteration {iter} for class '{class_name}'. Saving state.")
+            iteration_state = {
+                "last_completed_iteration": iter,
+                "current_instructions": current_instructions,
+                "best_instructions": best_instructions,
+                "best_mAP": best_mAP,
+                "prev_mAP": prev_mAP,
+                "current_mAP": current_mAP,
+                "prev_instructions": prev_instructions,
+                "iter_instructions": iter_instructions,
+                "instruction_refinements": instruction_refinements,
+            }
+            with open(iteration_state_path, "w", encoding="utf-8") as f:
+                json.dump(iteration_state, f, indent=2)
+            print(f"Saved iteration state to {iteration_state_path}")
+
+            if iter == num_iterations:
+                print(f"Reached the maximum number of iterations ({num_iterations}) for class '{class_name}'. Stopping refinement.")
+                break
+
 
             # --- Step 3: Identify worst-performing examples (simplified) ---
             # A simple heuristic: find images with the most false negatives (missed GT objects).
@@ -1196,24 +1372,10 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
             # --- Step 4: Refine prompt for next iteration ---
             current_instructions = method_refine_prompt(args, model, processor, 
-                        class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = i)
+                        class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = iter)
             
-            # Display the analysis
+            iter_instructions = current_instructions.copy()
             
-             # --- Iteration-level Save for Resume ---
-            print(f"Finished iteration {i} for class '{class_name}'. Saving state.")
-            iteration_state = {
-                "last_completed_iteration": i,
-                "current_instructions": current_instructions,
-                "best_instructions": best_instructions,
-                "best_mAP": best_mAP,
-                "prev_mAP": prev_mAP,
-                "prev_instructions": prev_instructions,
-                "instruction_refinements": instruction_refinements,
-            }
-            with open(iteration_state_path, "w", encoding="utf-8") as f:
-                json.dump(iteration_state, f, indent=2)
-            print(f"Saved iteration state to {iteration_state_path}")
 
             
 
@@ -1252,6 +1414,36 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
 
         refined_class_instructions_json[class_name] = best_instructions
+
+        # --- Incremental Save for Resume ---
+        print(f"\nFinished processing class '{class_name}'. Saving intermediate results to allow for resuming.")
+        with open(all_iterm_refined_instructions_path, "w", encoding="utf-8") as f:
+            json.dump(refined_class_instructions_json, f, indent=2)
+        print(f"Saved intermediate refined instructions to {all_iterm_refined_instructions_path}\n")
+
+
+
+        # --- Step 5: Evaluate instructions on ValSet to select best one ---
+        
+        #Evaluate all instructions on Val set to select the best one
+        valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, sigclip_pipe, stats_type)
+        print(f"\nEvaluation of all instructions on validation set for class '{class_name}':\n{valSet_instruction_eval_result}")
+        print(f"Best instructions on validation set for class '{class_name}' (mAP: {valSet_best_mAP:.4f}): \n{valSet_best_instructions}")
+
+        #Save validation set evaluation results
+        valSet_eval_results_path = os.path.join(dataset_result_dir, f"valSet_instruction_eval_results_{dataset_name}_cls_{class_name}.json")
+        with open(valSet_eval_results_path, "w", encoding="utf-8") as f:
+            json.dump(valSet_instruction_eval_result, f, indent=2)
+        print(f"Saved validation set evaluation results to {valSet_eval_results_path}")
+
+        #Save best instructions on validation set
+        valSet_best_instructions_path = os.path.join(dataset_result_dir, f"valSet_best_instructions_{dataset_name}_cls_{class_name}.txt")
+        with open(valSet_best_instructions_path, "w", encoding="utf-8") as f:
+            f.write(valSet_best_instructions)
+        print(f"Saved best instructions on validation set to {valSet_best_instructions_path}")
+
+
+        refined_class_instructions_json[class_name] = valSet_best_instructions
 
         # --- Incremental Save for Resume ---
         print(f"\nFinished processing class '{class_name}'. Saving intermediate results to allow for resuming.")
