@@ -17,12 +17,12 @@ set -e
 # api_key=$1
 
 echo "=== Creating conda environment ==="
-conda create -n qwen-vllm-env python=3.10 -y
+conda create -n vllm-env python=3.10 -y
 
 echo "=== Activating environment ==="
 # Conda activate doesn't work directly in non-interactive shells unless you source it
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate qwen-vllm-env
+conda activate vllm-env
 echo "Active Conda environment: $CONDA_DEFAULT_ENV"
 
 
@@ -58,6 +58,9 @@ conda install -c conda-forge supervision -y
 
 echo "===upgrading numpy==="
 conda install -c conda-forge numpy=2.0.1 -y
+
+echo "=== installing torch-c-dlpack-ext ===" # for vllm fp8 support
+pip install torch-c-dlpack-ext
 
 # echo "=== installing roboflow ==="
 # conda deactivate

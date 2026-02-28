@@ -249,16 +249,20 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
         return
 
     run_modes = []
-    if args.no_instructions:
-        run_modes.append("noinstr")
-    if args.few_shot:
-        run_modes.append("fewshot")
+    # if args.no_instructions:
+    #     run_modes.append("noinstr")
+    # if args.few_shot:
+    #     run_modes.append("fewshot")
     if args.vqa_rescore:
         run_modes.append("vqa")
-    if args.class_rescore:
-        run_modes.append("cls_rescore")
+    # if args.class_rescore:
+    #     run_modes.append("cls_rescore")
+    if args.rank_rescore:
+        run_modes.append("rank")
+    if args.rating_rescore:
+        run_modes.append("rating")
     # Add NMS threshold to run name to differentiate runs
-    run_modes.append(f"nms{args.nms_threshold}")
+    # run_modes.append(f"nms{args.nms_threshold}")
     run_name = "_".join(run_modes) if run_modes else "default"
 
     # Set seed for reproducibility

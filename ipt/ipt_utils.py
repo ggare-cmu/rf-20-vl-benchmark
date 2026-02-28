@@ -1027,8 +1027,9 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     # --- VQA-based Re-scoring ---
     # Create copies for different evaluation paths
     detections_model = [det.copy() for det in parsed_bboxes]
-    detections_vqa = []
 
+    detections_vqa = []
+    detections_ranking = []
 
     if args.rank_rescore and parsed_bboxes:
         
