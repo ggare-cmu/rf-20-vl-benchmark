@@ -470,7 +470,7 @@ def assign_score_based_on_ranking(parsed_bboxes, max_score=1.0, min_score=0.1):
 
     for i, det in enumerate(ranked_detections):
         # Linear scaling of score based on rank
-        det['model_score'] = det['score']
+        # det['model_score'] = det['score']
         det['rank_score'] = max_score - (max_score - min_score) * (i / (num_detections - 1)) if num_detections > 1 else max_score
         det['score'] = det['rank_score']
 
@@ -633,9 +633,9 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
         }
     ]
        
-
-    # output_text, inputs = model_generate(messages, model, processor)
-    output_text, inputs, outputs = model_generate_with_scores(messages, model, processor, max_new_tokens=5)
+    outputs = None
+    output_text, inputs = model_generate(messages, model, processor)
+    # output_text, inputs, outputs = model_generate_with_scores(messages, model, processor, max_new_tokens=5)
 
 
     #Sample
@@ -674,7 +674,8 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
     5) Iterates each item; if one is malformed, it is skipped. Others are still accepted.
 
     Returns a list of detections, each:
-      {"bbox": [x, y, w, h], "score": float, "category_name": str}
+    #   {"bbox": [x, y, w, h], "score": float, "category_name": str}
+      {"bbox": [x, y, w, h], "rating": int, "category_name": str}
     
     It also logs any skipped or malformed items to `skipped_detections.log` in the output_dir.
     """
@@ -813,22 +814,36 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                     print(f"{reason}: {item}")
                     Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
                     
-            score = float(item.get("score", -1.0))
-            if score == -1.0:
+            # score = float(item.get("score", -1.0))
+            # if score == -1.0:
+            #     # print(f"Skipping item (score is -1.0): {item}")
+            #     # reason = "Skipping item (score is -1.0)"
+            #     # print(f"{reason}: {item}")
+            #     # log_skipped(reason, item, output_text)
+            #     # continue
+            #     score = 0.5  # Assign default score and continue
+            #     print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
+            #     reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
+            #     print(f"{reason}: {item}")
+            #     Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
+
+            rating = float(item.get("rating", -1.0))
+            if rating == -1.0:
                 # print(f"Skipping item (score is -1.0): {item}")
                 # reason = "Skipping item (score is -1.0)"
                 # print(f"{reason}: {item}")
                 # log_skipped(reason, item, output_text)
                 # continue
-                score = 0.5  # Assign default score and continue
-                print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
-                reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
+                # rating = 0.5  # Assign default score and continue
+                rating = 3  # Assign default score and continue
+                print(f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing")
+                reason = f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing"
                 print(f"{reason}: {item}")
                 Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
 
             detections.append({
                 "bbox": [x1, y1, w, h],
-                "score": score,
+                "rating": rating,
                 "category_name": label
             })
 
@@ -1037,88 +1052,88 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         detections_ranking = assign_score_based_on_ranking(parsed_bboxes, max_score=1.0, min_score=0.1)
 
 
-    if args.rating_rescore and parsed_bboxes:
+    # if args.rating_rescore and parsed_bboxes:
         
-        # Assign new scores based on ranking order of detection bboxes - decending order have higher scores
-        detections_ranking = assign_score_based_on_rating(processor, parsed_bboxes, raw_text=raw_output_i, token_probs=outputs_probs)
+    #     # Assign new scores based on ranking order of detection bboxes - decending order have higher scores
+    #     detections_ranking = assign_score_based_on_rating(processor, parsed_bboxes, raw_text=raw_output_i, token_probs=outputs_probs)
 
 
-    if args.vqa_rescore and parsed_bboxes:
-        # original_image = Image.open(image_path).convert("RGB")
+    # if args.vqa_rescore and parsed_bboxes:
+    #     # original_image = Image.open(image_path).convert("RGB")
         
-        # # Create a list of images, each with one bounding box drawn
-        vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
+    #     # # Create a list of images, each with one bounding box drawn
+    #     vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
         
-        # Get VQA scores for all bboxes in a single batch call
-        # We use the category name of the first detection as the prompt for the whole batch,
-        # assuming all detections in this context are for the same class.
-        # vqa_prompt = parsed_bboxes[0]["category_name"]
-        vqa_prompts = [det["category_name"] for det in parsed_bboxes]
+    #     # Get VQA scores for all bboxes in a single batch call
+    #     # We use the category name of the first detection as the prompt for the whole batch,
+    #     # assuming all detections in this context are for the same class.
+    #     # vqa_prompt = parsed_bboxes[0]["category_name"]
+    #     vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
-        try:
-            vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            )
+    #     try:
+    #         vqa_scores = get_masked_image_vqa_scores_with_instructions(
+    #             model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+    #         )
 
-        except Exception as e:
-            print(f"❌ Unexpected error during inference: {e}")
+    #     except Exception as e:
+    #         print(f"❌ Unexpected error during inference: {e}")
 
-            print("Retrying with downsized image...")
+    #         print("Retrying with downsized image...")
         
-            # Free up GPU memory
-            torch.cuda.empty_cache()
+    #         # Free up GPU memory
+    #         torch.cuda.empty_cache()
 
-            # Downsize image by 50% (you can adjust this factor)
-            width, height = original_image.size
-            vqa_images_small = []
-            for img in vqa_images:
-                img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
-                vqa_images_small.append(img)
-            vqa_images = vqa_images_small
+    #         # Downsize image by 50% (you can adjust this factor)
+    #         width, height = original_image.size
+    #         vqa_images_small = []
+    #         for img in vqa_images:
+    #             img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+    #             vqa_images_small.append(img)
+    #         vqa_images = vqa_images_small
 
 
-            try:
-                vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                )
-                print("✅ Retry succeeded with downsized image.")
+    #         try:
+    #             vqa_scores = get_masked_image_vqa_scores_with_instructions(
+    #                     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+    #             )
+    #             print("✅ Retry succeeded with downsized image.")
 
-            except Exception as e:
-                print(f"❌ Unexpected error during inference: {e}")
-                torch.cuda.empty_cache()
-                vqa_scores = [-1] * len(parsed_bboxes)
+    #         except Exception as e:
+    #             print(f"❌ Unexpected error during inference: {e}")
+    #             torch.cuda.empty_cache()
+    #             vqa_scores = [-1] * len(parsed_bboxes)
         
-        detections_vqa = [det.copy() for det in detections_model]
+    #     detections_vqa = [det.copy() for det in detections_model]
 
-        # Replace original scores with VQA scores
-        for i, det in enumerate(detections_vqa):
-            det["model_score"] = det["score"]  # Keep original model score for reference
-            det["vqa_score"] = vqa_scores[i]
-            det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
+    #     # Replace original scores with VQA scores
+    #     for i, det in enumerate(detections_vqa):
+    #         det["model_score"] = det["score"]  # Keep original model score for reference
+    #         det["vqa_score"] = vqa_scores[i]
+    #         det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
 
-    # --- SigClip-based Re-scoring --- 
-    elif args.siglip_rescore and parsed_bboxes:
+    # # --- SigClip-based Re-scoring --- 
+    # elif args.siglip_rescore and parsed_bboxes:
 
-        detections_sigclip = [det.copy() for det in detections_model]
+    #     detections_sigclip = [det.copy() for det in detections_model]
 
-        for i, det in enumerate(detections_sigclip):
-            det["model_score"] = det["score"]  # Keep original model score for reference
+    #     for i, det in enumerate(detections_sigclip):
+    #         det["model_score"] = det["score"]  # Keep original model score for reference
 
-            #Crop the detected bbox region from the original image
-            x, y, w, h = map(int, det["bbox"])
-            if w == 0 or h == 0: continue #skip invalid bbox
-            cropped_img = original_image.crop((x, y, x + w, y + h))
-            # #save cropped image for debugging
-            # cropped_img.save(f"cropped_det_{i}.png")
+    #         #Crop the detected bbox region from the original image
+    #         x, y, w, h = map(int, det["bbox"])
+    #         if w == 0 or h == 0: continue #skip invalid bbox
+    #         cropped_img = original_image.crop((x, y, x + w, y + h))
+    #         # #save cropped image for debugging
+    #         # cropped_img.save(f"cropped_det_{i}.png")
 
-            sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
+    #         sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
 
-            det["siglip_score"] = sigclip_score
-            det["score"] = sigclip_score
+    #         det["siglip_score"] = sigclip_score
+    #         det["score"] = sigclip_score
         
-    else:
-        # If not VQA-rescoring, the VQA-based lists are the same as original
-        detections_vqa = [det.copy() for det in detections_model]
+    # else:
+    #     # If not VQA-rescoring, the VQA-based lists are the same as original
+    #     detections_vqa = [det.copy() for det in detections_model]
     
     # --- End of VQA-based Re-scoring ---
 
@@ -1128,9 +1143,9 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     # # --- End of NMS ---
 
     return raw_output, {
-        "model": detections_model,
+        # "model": detections_model,
         # "orig_with_nms": detections_orig_with_nms,
-        "vqa": detections_vqa,
+        # "vqa": detections_vqa,
         # "vqa_with_nms": detections_vqa_with_nms,
         # "sigclip": detections_sigclip,
         # "sigclip_with_nms": detections_sigclip_with_nms,

@@ -55,7 +55,10 @@ def evaluate_dataset(args, model, processor, dataset_path,
     os.makedirs(eval_dir, exist_ok=True)
 
     # Define paths for all 4 evaluation types
-    eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
+    # eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
+    # eval_types = ["model", "ranking", "rating", "vqa"]
+    # eval_types = ["model", "ranking", "rating", "ranking_rating_sum", "ranking_rating_prod"]
+    eval_types = ["ranking"]
     prediction_cache_paths = {
         eval_type: os.path.join(predictions_dir, f"predictions_{dataset_name}_{eval_type}.json") for eval_type in eval_types
     }
@@ -175,12 +178,16 @@ def evaluate_dataset(args, model, processor, dataset_path,
                     "image_path": image_path,
                     "gt_bboxes": [ann["bbox"] for ann in anns],
                     # "pred_bboxes": [det["bbox"] for det in all_detections["vqa_with_nms"]],
-                    "pred_bboxes": [det["bbox"] for det in all_detections["vqa_no_nms"]],
+                    # "pred_bboxes": [det["bbox"] for det in all_detections["vqa_no_nms"]],
+                    # "pred_bboxes": [det["bbox"] for det in all_detections["ranking_rating_prod"]], 
+                    "pred_bboxes": [det["bbox"] for det in all_detections["ranking"]], 
                     "raw_output": raw_output,
-                    "parsed_detections_org_before_nms": all_detections["orig_no_nms"],
-                    "parsed_detections_org_with_nms": all_detections["orig_with_nms"],
-                    "parsed_detections_before_nms": all_detections["vqa_no_nms"],
-                    "parsed_detections": all_detections["vqa_with_nms"],
+                    # "parsed_detections_model": all_detections["model"],
+                    # "parsed_detections_vqa": all_detections["vqa"],
+                    "parsed_detections_ranking": all_detections["ranking"],
+                    # "parsed_detections_rating": all_detections["rating"],
+                    # "parsed_detections_ranking_rating_sum": all_detections["ranking_rating_sum"],
+                    # "parsed_detections_ranking_rating_prod": all_detections["ranking_rating_prod"],
                     "gt_anns": anns,
                     "cat_dict": cat_dict,
                 }
@@ -383,16 +390,18 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
     if ds_stats is not None:
         # Print summary of results
         print("\n--- Summary of Results ---")
-        print(f"[orig_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][0]:.4f}")
-        print(f"[orig_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][0]:.4f}")
-        print(f"[vqa_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][0]:.4f}")
-        print(f"[vqa_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][0]:.4f}")
+        # print(f"[orig_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][0]:.4f}")
+        # print(f"[orig_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][0]:.4f}")
+        # print(f"[vqa_no_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][0]:.4f}")
+        # print(f"[vqa_with_nms] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][0]:.4f}")
+        print(f"[ranking] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['ranking'][0]:.4f}")
 
         #AR@1
-        print(f"[orig_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][6]:.4f}")
-        print(f"[orig_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][6]:.4f}")
-        print(f"[vqa_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][6]:.4f}")
-        print(f"[vqa_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][6]:.4f}")
+        # print(f"[orig_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_no_nms'][6]:.4f}")
+        # print(f"[orig_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['orig_with_nms'][6]:.4f}")
+        # print(f"[vqa_no_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_no_nms'][6]:.4f}")
+        # print(f"[vqa_with_nms] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa_with_nms'][6]:.4f}")
+        print(f"[ranking] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['ranking'][6]:.4f}")
 
     else:
         print(f"Evaluation failed for {dataset_path}")

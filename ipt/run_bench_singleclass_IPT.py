@@ -76,7 +76,10 @@ def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_d
     os.makedirs(eval_dir, exist_ok=True)
 
     # Define paths for all 4 evaluation types
-    eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
+    # eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
+    # eval_types = ["model", "ranking", "rating", "vqa"]
+    # eval_types = ["model", "ranking", "rating", "ranking_rating_sum", "ranking_rating_prod"]
+    eval_types = ["ranking"]
     prediction_cache_paths = {
         eval_type: os.path.join(predictions_dir, f"predictions_{dataset_name}_{eval_type}.json") for eval_type in eval_types
     }
@@ -163,10 +166,15 @@ def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_d
                     "image_path": image_path,
                     "gt_bboxes": [ann["bbox"] for ann in anns],
                     # "pred_bboxes": [det["bbox"] for det in all_detections["vqa_with_nms"]],
-                    "pred_bboxes": [det["bbox"] for det in all_detections["vqa_no_nms"]],
+                    # "pred_bboxes": [det["bbox"] for det in all_detections["vqa_no_nms"]],
+                    # "raw_output": raw_output,
+                    # "parsed_detections_before_nms": all_detections["vqa_no_nms"],
+                    # "parsed_detections": all_detections["vqa_with_nms"],
+                    "pred_bboxes": [det["bbox"] for det in all_detections["ranking"]], 
                     "raw_output": raw_output,
-                    "parsed_detections_before_nms": all_detections["vqa_no_nms"],
-                    "parsed_detections": all_detections["vqa_with_nms"],
+                    # "parsed_detections_model": all_detections["model"],
+                    # "parsed_detections_vqa": all_detections["vqa"],
+                    "parsed_detections_ranking": all_detections["ranking"],
                     "all_detections": all_detections,
                     "gt_anns": anns,
                     "cat_dict": cat_dict,
@@ -686,7 +694,7 @@ def method_generate_initial_class_definition(args, model, processor, cat_id, cla
         return initial_instructions
     
 
-def method_evaluate_current_instructions(args, model, processor, class_name, cat_id, current_instructions, 
+def method_evaluate_current_instructions(args, model, iter, processor, class_name, cat_id, current_instructions, 
                                   dataset_name, dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
                                   i, instruction_refinements,
                                   best_instructions, best_mAP,
@@ -748,9 +756,9 @@ def method_evaluate_current_instructions(args, model, processor, class_name, cat
         # ar100 = all_stats_dict.get("vqa_with_nms", [0.0]*12)[8]
         ar1 = all_stats_dict.get(stats_type, [0.0]*12)[6]
         
-        print(f"Iteration {i} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
+        print(f"Iteration {iter} - Class '{class_name}': mAP@.50-.95 = {ap50_95:.4f}, AR@1 = {ar1:.4f}")
 
-        instruction_refinements[f"class_{class_name}_iter_{i}"] = {
+        instruction_refinements[f"class_{class_name}_iter_{iter}"] = {
             "mAP_50_95": ap50_95,
             "AR_1": ar1,
             "instructions": current_instructions
@@ -763,7 +771,7 @@ def method_evaluate_current_instructions(args, model, processor, class_name, cat
 
 
         if ap50_95 < prev_mAP:
-            print(f"Iteration {i} - Class '{class_name}': mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}). Reverting to previous instructions.")
+            print(f"Iteration {iter} - Class '{class_name}': mAP decreased from previous iteration ({prev_mAP:.4f} to {ap50_95:.4f}). Reverting to previous instructions.")
             current_instructions = prev_instructions
             # continue  # Skip to next class without refining
         else:
@@ -778,7 +786,7 @@ def method_evaluate_current_instructions(args, model, processor, class_name, cat
     return all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements
 
 
-def method_identify_worst_performing_examples(all_results_for_iter, cat_id, class_name, dataset_result_dir,
+def method_identify_worst_performing_examples(all_results_for_iter, iter, cat_id, class_name, dataset_result_dir,
                                               prev_worst_examples_map, stats_type="vqa_no_nms"):
 
 
@@ -980,12 +988,12 @@ def method_identify_worst_performing_examples(all_results_for_iter, cat_id, clas
 
     prev_worst_examples_map = worst_examples_map
     
-    print(f"Worst examples selected for iteration {i+1}, class '{class_name}': \n{worst_examples_map}")
+    print(f"Worst examples selected for iteration {iter+1}, class '{class_name}': \n{worst_examples_map}")
                 
     few_shot_examples = {}
     for idx, (ex_type, ex) in enumerate(worst_examples_map.items()):
         if ex is None:
-            print(f"No example found for {ex_type} in iteration {i+1} for class '{class_name}'.")
+            print(f"No example found for {ex_type} in iteration {iter+1} for class '{class_name}'.")
             continue
 
         img = Image.open(ex['image_path']).convert("RGB")
@@ -1008,7 +1016,7 @@ def method_identify_worst_performing_examples(all_results_for_iter, cat_id, clas
             caption = f"Worst FN (Error: {ex['fn_error']:.2f})"
         
         else:
-            print(f"[Warning] Unknown example type: {ex_type} for iteration {i+1}, class '{class_name}' with example: {ex}")
+            print(f"[Warning] Unknown example type: {ex_type} for iteration {iter+1}, class '{class_name}' with example: {ex}")
             continue
 
 
@@ -1018,7 +1026,7 @@ def method_identify_worst_performing_examples(all_results_for_iter, cat_id, clas
         img_with_boxes.thumbnail(max_dimension, Image.LANCZOS)
         print(f"file_{os.path.basename(ex['image_path'])} resized img.size [org size = {img.size}]: {img_with_boxes.size}")
         
-        img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_iter{i}_{ex_type}_imId_{ex['img_id']}_caption_{caption}.png")
+        img_viz_path = os.path.join(dataset_result_dir, f"few_shot_example_cls_{class_name}_iter{iter}_{ex_type}_imId_{ex['img_id']}_caption_{caption}.png")
         #Save image
         img_with_boxes.save(img_viz_path)
 
@@ -1324,14 +1332,17 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
             print(f"\n\n\n--- Iteration {iter} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
 
-            # stats_type = "vqa_with_nms"
-            stats_type = "vqa_no_nms"
-            # stats_type = "orig_with_nms"
+            # stats_type = "model"
+            # stats_type = "vqa"
+            stats_type = "ranking"
+            # stats_type = "rating"
+            # stats_type = "ranking_rating_sum"
+            # stats_type = "ranking_rating_prod"
 
 
             # --- Step 2: Evaluate with the current prompt ---
             all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
-                        model, processor, class_name, cat_id, current_instructions, 
+                        model, iter, processor, class_name, cat_id, current_instructions, 
                         dataset_name, dataset_path, f"{dataset_result_dir}_iter{iter}", coco_gt, sigclip_pipe,
                         iter, instruction_refinements,
                         best_instructions, best_mAP,
@@ -1367,7 +1378,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             # --- Step 3: Identify worst-performing examples (simplified) ---
             # A simple heuristic: find images with the most false negatives (missed GT objects).
             few_shot_examples, prev_worst_examples_map = method_identify_worst_performing_examples(
-                        all_results_for_iter, cat_id, class_name, dataset_result_dir,
+                        all_results_for_iter, iter, cat_id, class_name, dataset_result_dir,
                         prev_worst_examples_map, stats_type=stats_type)
 
 
