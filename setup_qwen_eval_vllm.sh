@@ -14,7 +14,7 @@
 # Exit immediately if a command fails
 set -e
 
-# api_key=$1
+api_key=$1
 
 echo "=== Creating conda environment ==="
 conda create -n vllm-env python=3.10 -y
