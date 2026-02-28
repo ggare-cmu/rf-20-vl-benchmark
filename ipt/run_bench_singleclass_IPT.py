@@ -1526,8 +1526,8 @@ def run_single_dataset_evaluation(args):
         )
 
 
-    # After use free up memory:
-    del model
+    # # After use free up memory:
+    # del model
     torch.cuda.empty_cache()
     gc.collect()
 
