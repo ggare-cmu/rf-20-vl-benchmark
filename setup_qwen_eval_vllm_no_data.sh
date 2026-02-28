@@ -85,7 +85,7 @@ pip install torch-c-dlpack-ext
 # mkdir -p results
 
 # source "$(conda info --base)/etc/profile.d/conda.sh"
-# conda activate qwen-eval-env
+# conda activate vllm-env
 # echo "Active Conda environment: $CONDA_DEFAULT_ENV"
 
 echo "===script successful!!! ======"
