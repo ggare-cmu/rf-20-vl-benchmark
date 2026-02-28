@@ -1386,7 +1386,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             current_instructions = method_refine_prompt(args, model, processor, 
                         class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = iter)
             
-            iter_instructions = current_instructions.copy()
+            iter_instructions = current_instructions
             
 
             
