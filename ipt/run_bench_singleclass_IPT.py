@@ -79,7 +79,8 @@ def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_d
     # eval_types = ["orig_no_nms", "orig_with_nms", "vqa_no_nms", "vqa_with_nms"]
     # eval_types = ["model", "ranking", "rating", "vqa"]
     # eval_types = ["model", "ranking", "rating", "ranking_rating_sum", "ranking_rating_prod"]
-    eval_types = ["ranking"]
+    # eval_types = ["ranking"]
+    eval_types = ["model", "ranking"]
     prediction_cache_paths = {
         eval_type: os.path.join(predictions_dir, f"predictions_{dataset_name}_{eval_type}.json") for eval_type in eval_types
     }
@@ -172,7 +173,7 @@ def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_d
                     # "parsed_detections": all_detections["vqa_with_nms"],
                     "pred_bboxes": [det["bbox"] for det in all_detections["ranking"]], 
                     "raw_output": raw_output,
-                    # "parsed_detections_model": all_detections["model"],
+                    "parsed_detections_model": all_detections["model"],
                     # "parsed_detections_vqa": all_detections["vqa"],
                     "parsed_detections_ranking": all_detections["ranking"],
                     "all_detections": all_detections,

@@ -497,6 +497,43 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     #     f"Locate all of the following objects: {class_name} in the image and output the coordinates in JSON format. Return the most confident bounding box detections as a ranked list (maximum 20 items) sorted by confidence (highest first). Also, rate the confidence of detection on a scale of 1 to 5.\n\nUse the following annotator instructions to improve detection accuracy:\n{dataset_instructions}\n\nReturn a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"rating\":*confidence_rating 1-5*}}."
     # )
 
+    # prompt_text = (
+    #     f"""
+    #         Identify and localize all instances of "{class_name}" in the image.
+
+    #         Output Requirements:
+    #         - Return valid JSON only. Do not include explanations or extra text.
+    #         - Output a ranked list of detections sorted by confidence (highest first).
+    #         - Include at most 20 detections.
+    #         - If no objects are detected, return an empty list [].
+
+    #         For each detection, provide:
+    #         - "bbox_2d": [x1, y1, x2, y2]
+    #             * Pixel coordinates.
+    #             * (x1, y1) = top-left corner.
+    #             * (x2, y2) = bottom-right corner.
+    #         - "label": "{class_name}"
+    #         - "rating": integer confidence rating from 1 (lowest) to 5 (highest).
+
+    #         Additional Constraints:
+    #         - Only include detections that clearly correspond to "{class_name}".
+    #         - Avoid duplicate or highly overlapping boxes for the same object.
+    #         - Follow these annotator instructions to improve detection accuracy:
+
+    #         {dataset_instructions}
+
+    #         Return a JSON list in the following format:
+    #         [
+    #         {{
+    #             "bbox_2d": [x1, y1, x2, y2],
+    #             "label": "{class_name}",
+    #             "rating": 5
+    #         }}
+    #         ]
+    #         """
+    # )
+
+
     prompt_text = (
         f"""
             Identify and localize all instances of "{class_name}" in the image.
@@ -513,7 +550,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
                 * (x1, y1) = top-left corner.
                 * (x2, y2) = bottom-right corner.
             - "label": "{class_name}"
-            - "rating": integer confidence rating from 1 (lowest) to 5 (highest).
+            - "score": float confidence score from 0.0 (lowest) to 1.0 (highest) indicating the likelihood that the bounding box contains the specified object.
 
             Additional Constraints:
             - Only include detections that clearly correspond to "{class_name}".
@@ -527,7 +564,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
             {{
                 "bbox_2d": [x1, y1, x2, y2],
                 "label": "{class_name}",
-                "rating": 5
+                "score": 0.95
             }}
             ]
             """

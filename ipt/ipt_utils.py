@@ -470,7 +470,7 @@ def assign_score_based_on_ranking(parsed_bboxes, max_score=1.0, min_score=0.1):
 
     for i, det in enumerate(ranked_detections):
         # Linear scaling of score based on rank
-        # det['model_score'] = det['score']
+        det['model_score'] = det['score']
         det['rank_score'] = max_score - (max_score - min_score) * (i / (num_detections - 1)) if num_detections > 1 else max_score
         det['score'] = det['rank_score']
 
@@ -585,6 +585,44 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     #     f"Locate all of the following objects: {class_name} in the image and output the coordinates in JSON format. Return the most confident bounding box detections as a ranked list (maximum 20 items) sorted by confidence (highest first). Also, rate the confidence of detection on a scale of 1 to 5.\n\nUse the following annotator instructions to improve detection accuracy:\n{dataset_instructions}\n\nReturn a list of items like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"{class_name}\",\"rating\":*confidence_rating 1-5*}}."
     # )
 
+    # prompt_text = (
+    #     f"""
+    #         Identify and localize all instances of "{class_name}" in the image.
+
+    #         Output Requirements:
+    #         - Return valid JSON only. Do not include explanations or extra text.
+    #         - Output a ranked list of detections sorted by confidence (highest first).
+    #         - Include at most 20 detections.
+    #         - If no objects are detected, return an empty list [].
+
+    #         For each detection, provide:
+    #         - "bbox_2d": [x1, y1, x2, y2]
+    #             * Pixel coordinates.
+    #             * (x1, y1) = top-left corner.
+    #             * (x2, y2) = bottom-right corner.
+    #         - "label": "{class_name}"
+    #         - "rating": integer confidence rating from 1 (lowest) to 5 (highest).
+
+    #         Additional Constraints:
+    #         - Only include detections that clearly correspond to "{class_name}".
+    #         - Avoid duplicate or highly overlapping boxes for the same object.
+            
+    #         Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:
+
+    #         {dataset_instructions}
+
+    #         Return a JSON list in the following format:
+    #         [
+    #         {{
+    #             "bbox_2d": [x1, y1, x2, y2],
+    #             "label": "{class_name}",
+    #             "rating": 5
+    #         }}
+    #         ]
+    #         """
+    # )
+
+
     prompt_text = (
         f"""
             Identify and localize all instances of "{class_name}" in the image.
@@ -601,13 +639,12 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
                 * (x1, y1) = top-left corner.
                 * (x2, y2) = bottom-right corner.
             - "label": "{class_name}"
-            - "rating": integer confidence rating from 1 (lowest) to 5 (highest).
+            - "score": float confidence score from 0.0 (lowest) to 1.0 (highest) indicating the likelihood that the bounding box contains the specified object.
 
             Additional Constraints:
             - Only include detections that clearly correspond to "{class_name}".
             - Avoid duplicate or highly overlapping boxes for the same object.
-            
-            Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:
+            - Follow these annotator instructions to improve detection accuracy:
 
             {dataset_instructions}
 
@@ -616,7 +653,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
             {{
                 "bbox_2d": [x1, y1, x2, y2],
                 "label": "{class_name}",
-                "rating": 5
+                "score": 0.95
             }}
             ]
             """
@@ -814,36 +851,36 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                     print(f"{reason}: {item}")
                     Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
                     
-            # score = float(item.get("score", -1.0))
-            # if score == -1.0:
-            #     # print(f"Skipping item (score is -1.0): {item}")
-            #     # reason = "Skipping item (score is -1.0)"
-            #     # print(f"{reason}: {item}")
-            #     # log_skipped(reason, item, output_text)
-            #     # continue
-            #     score = 0.5  # Assign default score and continue
-            #     print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
-            #     reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
-            #     print(f"{reason}: {item}")
-            #     Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
-
-            rating = float(item.get("rating", -1.0))
-            if rating == -1.0:
+            score = float(item.get("score", -1.0))
+            if score == -1.0:
                 # print(f"Skipping item (score is -1.0): {item}")
                 # reason = "Skipping item (score is -1.0)"
                 # print(f"{reason}: {item}")
                 # log_skipped(reason, item, output_text)
                 # continue
-                # rating = 0.5  # Assign default score and continue
-                rating = 3  # Assign default score and continue
-                print(f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing")
-                reason = f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing"
+                score = 0.5  # Assign default score and continue
+                print(f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing")
+                reason = f"Score is -1.0 for item: {item}, so assigning default score 0.5 and continuing"
                 print(f"{reason}: {item}")
                 Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
 
+            # rating = float(item.get("rating", -1.0))
+            # if rating == -1.0:
+            #     # print(f"Skipping item (score is -1.0): {item}")
+            #     # reason = "Skipping item (score is -1.0)"
+            #     # print(f"{reason}: {item}")
+            #     # log_skipped(reason, item, output_text)
+            #     # continue
+            #     # rating = 0.5  # Assign default score and continue
+            #     rating = 3  # Assign default score and continue
+            #     print(f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing")
+            #     reason = f"Rating is -1.0 for item: {item}, so assigning default rating 3 and continuing"
+            #     print(f"{reason}: {item}")
+            #     Flag_log_output_text = log_skipped(reason, item, output_text, Flag_log_output_text)
+
             detections.append({
                 "bbox": [x1, y1, w, h],
-                "rating": rating,
+                "score": score,
                 "category_name": label
             })
 
@@ -1143,7 +1180,7 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     # # --- End of NMS ---
 
     return raw_output, {
-        # "model": detections_model,
+        "model": detections_model,
         # "orig_with_nms": detections_orig_with_nms,
         # "vqa": detections_vqa,
         # "vqa_with_nms": detections_vqa_with_nms,
