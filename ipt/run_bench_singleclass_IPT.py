@@ -27,6 +27,7 @@ import run_bench_singleclass_evaluator as evaluator
 import ipt_utils as utils
 
 
+# os.environ['CUDA_VISIBLE_DEVICES'] = "1"  # For debugging, set to a single GPU. Adjust as needed for multi-GPU setups.
 
 
 def get_seed_state():
@@ -1542,9 +1543,11 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument("--vqa_rescore", action="store_true", help="Use VQA-based re-scoring of candidate masks")
+    parser.add_argument("--rank_rescore", action="store_true", help="Use Rank-based class re-scoring of candidate masks")
+    parser.add_argument("--rating_rescore", action="store_true", help="Use Rating-based class re-scoring of candidate masks")
     parser.add_argument("--siglip_rescore", action="store_true", help="Use SigLip-based re-scoring of candidate masks")
-    parser.add_argument("--apply_nms", action="store_true", help="Apply Non-Maximum Suppression to detections.")
-    parser.add_argument("--nms_threshold", type=float, default=0.5, help="IoU threshold for Non-Maximum Suppression.")
+    # parser.add_argument("--apply_nms", action="store_true", help="Apply Non-Maximum Suppression to detections.")
+    # parser.add_argument("--nms_threshold", type=float, default=0.5, help="IoU threshold for Non-Maximum Suppression.")
     parser.add_argument("--class_rescore", action="store_true", help="Use VQA-based class re-scoring of candidate masks")
     parser.add_argument("--ipt_mode", action="store_true", help="Enable Iterative Prompt Tuning (requires --dataset_path).")
     parser.add_argument("--num_ipt_iterations", type=int, default=3, help="Number of iterations for IPT.")

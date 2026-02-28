@@ -220,7 +220,6 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
     image_inputs, _ = process_vision_info(conversations)
     # inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt").to(model.device)
     # inputs = processor(text=text_input, images=image_inputs, padding=True, return_tensors="pt")
-    inputs_org = processor(text=[text_input], images=image_inputs, padding=True, return_tensors="pt")
     
     with torch.no_grad():
         # generated_ids = model.generate(**inputs, max_new_tokens=512)
@@ -245,20 +244,19 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
             max_tokens=max_new_tokens,
             top_k=-1,
             # logprobs=max_new_tokens,   # get top-5 logprobs per token
-            # logprobs=5,   # get top-5 logprobs per token
-            logprobs=10,   # get top-10 logprobs per token
+            logprobs=5,   # get top-5 logprobs per token
             stop_token_ids=[],
         )
         outputs = model.generate(inputs, sampling_params = sampling_params)
-        for i, output in enumerate(outputs):
-            output_text = output.outputs[0].text
+        # for i, output in enumerate(outputs):
+        #     output_text = output.outputs[0].text
 
     # # Generate outputs
     # with torch.inference_mode():
     #     outputs = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False, output_scores=True, return_dict_in_generate=True)
     
     
-    return output_text, inputs_org, outputs
+    return outputs
 
 
 # Siglip utils
@@ -459,107 +457,21 @@ def apply_nms(detections, iou_threshold=0.5):
 
 
 
-def assign_score_based_on_ranking(parsed_bboxes, max_score=1.0, min_score=0.1):
+def assign_score_based_on_ranking(ranked_detections, max_score=1.0, min_score=0.1):
     """
     Assigns a confidence score to each detection based on its rank.
     The highest-ranked detection gets max_score, the lowest gets min_score, and others are scaled in between.
     """
+    if not ranked_detections:
+        return []
     
-    ranked_detections = [det.copy() for det in parsed_bboxes]
     num_detections = len(ranked_detections)
 
     for i, det in enumerate(ranked_detections):
         # Linear scaling of score based on rank
-        det['model_score'] = det['score']
-        det['rank_score'] = max_score - (max_score - min_score) * (i / (num_detections - 1)) if num_detections > 1 else max_score
-        det['score'] = det['rank_score']
+        det['score'] = max_score - (max_score - min_score) * (i / (num_detections - 1)) if num_detections > 1 else max_score
 
     return ranked_detections
-
-
-
-def getRatingTokenIdx(predicted_tokens):
-    """
-    Find indices of rating value tokens in the predicted token sequence.
-    Looks for the pattern: token containing 'rating' followed eventually by a digit token 1-5.
-    """
-    rating_chars = [str(i) for i in range(1, 6)]
-    rating_indices = []
-    
-    for i, token in enumerate(predicted_tokens):
-        # Look for tokens that follow a "rating" key context
-        # Pattern: find '"rating":' or '"rating": ' then the next digit token
-        if any(c in token for c in rating_chars):
-            # Check if any previous nearby token contains 'rating'
-            context_window = predicted_tokens[max(0, i-5):i]
-            if any('rating' in t.lower() for t in context_window):
-                rating_indices.append(i)
-    
-    return rating_indices
-
-
-def assign_score_based_on_rating(processor, parsed_bboxes, raw_text, token_probs):
-    """
-    Assigns a confidence score to each detection based on its rating.
-    Finds the rating token in the generated sequence and normalizes its
-    likelihood against tokens [1,2,3,4,5] to produce a score.
-    """
-    rating_detections = [det.copy() for det in parsed_bboxes]
-    num_detections = len(rating_detections)
-
-    predicted_tokens = [
-        processor.tokenizer.decode(torch.argmax(token_probs[i], dim=-1))
-        for i in range(len(token_probs))
-    ]
-    print(f"Predicted tokens: {predicted_tokens}")
-
-    # Get token IDs for digits 1-5
-    rating_values = [1, 2, 3, 4, 5]
-    rating_token_ids = [processor.tokenizer.encode(str(v))[0] for v in rating_values]
-    print(f"Rating token IDs: {dict(zip(rating_values, rating_token_ids))}")
-
-    if len(rating_token_ids) != len(set(rating_token_ids)):
-        print(f"Warning: Rating token IDs are not unique: {np.unique(rating_token_ids, return_counts=True)}")
-
-    # Find rating token positions
-    rating_indices = getRatingTokenIdx(predicted_tokens)
-    print(f"Found rating token indices: {rating_indices}")
-
-    def get_normalized_rating_score(logits_at_pos):
-        """Given raw logits at a token position, return normalized prob distribution over 1-5."""
-        probs = torch.nn.functional.softmax(logits_at_pos, dim=-1)
-        rating_probs = torch.tensor([probs[tid].item() for tid in rating_token_ids])
-        rating_probs = rating_probs / rating_probs.sum()  # Normalize over [1-5] only
-        
-        # Expected value score mapped to [0, 1]
-        expected_rating = (rating_probs * torch.tensor(rating_values, dtype=torch.float)).sum()
-        normalized_score = (expected_rating - 1) / (5 - 1)  # Scale to [0, 1]
-        
-        return normalized_score.item(), rating_probs
-
-    for i, det in enumerate(rating_detections):
-        det['model_score'] = det.get('score', 0)
-        
-        if rating_indices and i < len(rating_indices):
-            idx = rating_indices[i]
-            logits = token_probs[idx]  # shape: [vocab_size]
-            normalized_score, rating_probs = get_normalized_rating_score(logits)
-
-            print(f"Detection {i}: rating_probs={dict(zip(rating_values, rating_probs.tolist()))}, "
-                  f"normalized_score={normalized_score:.4f}")
-
-            det['rating_score'] = normalized_score
-            det['score'] = normalized_score
-        else:
-            # Fallback: use raw rating from parsed bbox if available
-            raw_rating = det.get('rating', 3)  # default to middle rating
-            det['rating_score'] = (raw_rating - 1) / 4.0
-            det['score'] = det['rating_score']
-            print(f"Detection {i}: No rating token found, falling back to raw rating={raw_rating}")
-
-    return rating_detections
-
-
 
 
 def run_qwen_inference(args, model, processor, image, dataset_instructions, class_name):
@@ -606,8 +518,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
             Additional Constraints:
             - Only include detections that clearly correspond to "{class_name}".
             - Avoid duplicate or highly overlapping boxes for the same object.
-            
-            Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:
+            - Follow these annotator instructions to improve detection accuracy:
 
             {dataset_instructions}
 
@@ -622,6 +533,53 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
             """
     )
 
+    # prompt_text = (
+    # f"""
+    #     Follow the steps outlined in the pseudo code below on this image for object detection. 
+    #     Use the dataset’s annotator instructions and class name definitions provided here to guide detection and labeling:\n{dataset_instructions}\n"
+
+    #     Do NOT return code or explanations — only output the final JSON list of bounding boxes.
+
+        
+    #     Pseudo code for reference:
+    #     INPUT:
+    #         - image
+    #         - class_list = [{class_name}]  # list of classes to detect
+
+    #     PROCESS:
+    #         detections = []  # initialize empty list for detected objects
+
+    #         for each class_name in class_list:
+    #             # Step 1: Scan the image at multiple scales to detect both large and tiny objects
+    #             multi_scale_regions = model.predict_regions_multiscale(image, class_name)
+
+    #             # Step 2: For each candidate region, get bounding box and initial confidence score
+    #             for region in multi_scale_regions:
+    #                 bbox = region.get_bbox()  # [x_min, y_min, x_max, y_max]
+    #                 bbox_confidence = region.get_confidence()  # confidence that bbox contains an object
+    #                 class_cosine_similarity = model.get_class_similarity(region, class_name)  # cosine similarity of region to class_name
+
+    #                 # Step 3: Combine both scores for final confidence
+    #                 # - This ensures the score reflects both detection quality and label match
+    #                 calibrated_score = bbox_confidence * 0.5 + class_cosine_similarity * 0.5  # weighted average (adjust weights if desired)
+
+
+    #                 # Step 4: Include even small objects (tiny bounding boxes)
+    #                 detections.append({{
+    #                     "bbox_2d": bbox,
+    #                     "label": class_name,
+    #                     "score": calibrated_score
+    #                 }})
+
+    #         # Optional: sort detections by score descending
+    #         detections.sort(key=lambda x: x['score'], reverse=True)
+
+    #     OUTPUT:
+    #         Return the 'detections' list in JSON format
+
+    # """    
+    # )
+
     
     messages = [
         {
@@ -634,8 +592,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     ]
        
 
-    # output_text, inputs = model_generate(messages, model, processor)
-    output_text, inputs, outputs = model_generate_with_scores(messages, model, processor, max_new_tokens=5)
+    output_text, inputs = model_generate(messages, model, processor)
 
 
     #Sample
@@ -652,8 +609,7 @@ def run_qwen_inference(args, model, processor, image, dataset_instructions, clas
     # input_width = 1000
 
     # return output_text
-    # return output_text, input_width, input_height
-    return output_text, input_width, input_height, outputs
+    return output_text, input_width, input_height
 
 
 
@@ -690,12 +646,8 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "reason": reason,
                 "item": item,
-                # "original_output": output_text if Flag_log_output_text else "Not logged",
+                "original_output": output_text if Flag_log_output_text else "Not logged",
             }
-
-            if Flag_log_output_text:
-                log_entry["original_output"] = output_text
-
             f.write(json.dumps(log_entry) + "\n")
 
         Flag_log_output_text = False
@@ -841,6 +793,102 @@ def parse_qwen_output_to_detections(output_text, class_name_list, output_dir="."
     return detections
 
 
+def build_few_shot_dict(dataset_path, examples_per_class=2, coco_override=None):
+    """
+    For each category in the train set, pick up to 3 random images that contain it,
+    visualize the ground truth bounding boxes, and store them in a dictionary:
+
+      {
+        "cat_name_1": [
+           { "image_path": "...", "viz_path": "...", "bboxes": [...], ... },
+           ...
+        ],
+        "cat_name_2": [...],
+        ...
+      }
+    """
+
+    train_dir = os.path.join(dataset_path, "train")
+    train_ann = os.path.join(train_dir, "_annotations.coco.json")
+
+    few_shot_dict = {}
+
+    # If train annotations are missing, just return empty
+    if not os.path.isfile(train_ann):
+        print(f"No train annotations found for few-shot in {dataset_path}.")
+        return few_shot_dict
+
+
+    # coco_train = COCO(train_ann)
+    if coco_override is not None:
+        coco_train = coco_override
+        print(f"Using coco_override for {dataset_path}.")
+    else:
+        coco_train = COCO(train_ann)
+
+
+    cat_ids = coco_train.getCatIds()
+    if not cat_ids:
+        print(f"No categories in train for few-shot in {dataset_path}.")
+        return few_shot_dict
+
+    viz_dir = os.path.join("data_viz", "few_shot_examples")
+    os.makedirs(viz_dir, exist_ok=True)
+
+    # For each category, pick up to 3 images
+    for cat_id in cat_ids:
+        cat_name = coco_train.cats[cat_id]["name"]
+
+        # All images that have this category
+        img_ids = coco_train.getImgIds(catIds=[cat_id])
+        if not img_ids:
+            # No images for this category
+            few_shot_dict[cat_name] = []
+            continue
+
+        # Randomly choose up to 3 images
+        selected_img_ids = random.sample(img_ids, min(examples_per_class, len(img_ids)))
+        examples_list = []
+
+        for chosen_img_id in selected_img_ids:
+            ann_ids = coco_train.getAnnIds(imgIds=[chosen_img_id], catIds=[cat_id])
+            anns = coco_train.loadAnns(ann_ids)
+
+            img_info_list = coco_train.loadImgs(chosen_img_id)
+            if not img_info_list:
+                continue
+
+            img_info = img_info_list[0]
+            image_path = os.path.join(train_dir, img_info["file_name"])
+            if not os.path.isfile(image_path):
+                continue
+
+            # Visualize GT boxes for THIS category only, or for the entire image if you like:
+            gt_bboxes = [ann["bbox"] for ann in anns]
+
+            out_viz_path = os.path.join(
+                viz_dir, f"few_shot_{cat_name}_{os.path.basename(img_info['file_name'])}"
+            )
+
+            visualize_bboxes(
+                image_path=image_path,
+                pred_bboxes=[],  # no predictions, only GT
+                gt_bboxes=gt_bboxes,
+                save_path=out_viz_path
+            )
+
+            example_dict = {
+                "image_path": image_path,
+                "viz_path": out_viz_path,
+                "category_name": cat_name,
+                "bboxes": gt_bboxes
+            }
+            examples_list.append(example_dict)
+
+        # Store them in the dictionary keyed by cat_name
+        few_shot_dict[cat_name] = examples_list
+
+    return few_shot_dict
 
 
 def getMaxInputSizeForQwen(width, height, max_dimension=(2880, 1620)):
@@ -890,53 +938,8 @@ def getMaxInputSizeForQwen(width, height, max_dimension=(2880, 1620)):
     return max_dimension
 
 
-
-def run_model_with_retries(args, model, processor, original_image, dataset_instructions, class_name):
-
-    try:
-        raw_output_i, input_width, input_height, outputs_probs = run_qwen_inference(
-            args,
-            model, processor,
-            image=original_image,
-            dataset_instructions=dataset_instructions,
-            class_name=class_name,
-        )
-
-    except Exception as e:
-        print(f"❌ Unexpected error during inference: {e}")
-
-        print("Retrying with downsized image...")
-
-        # Free up GPU memory
-        torch.cuda.empty_cache()
-
-        # width, height = original_image.size
-        resized_image = original_image.resize(
-            (1280, 720),
-            Image.Resampling.LANCZOS
-        )
-
-        try:
-            # Retry inference with downsized image
-            raw_output_i, input_width, input_height, outputs_probs = run_qwen_inference(
-                args,
-                model, processor,
-                image=resized_image,
-                dataset_instructions=dataset_instructions,
-                class_name=class_name,
-            )
-            print("✅ Retry succeeded with downsized image.")
-
-        except Exception as e:
-            print(f"❌ Unexpected error during inference: {e}")
-            torch.cuda.empty_cache()
-            raw_output_i, input_width, input_height, outputs_probs = '', None, None, None
-
-    return raw_output_i, input_width, input_height, outputs_probs
-
-
-
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
+                                #   no_instructions=False, few_shot_examples=None, output_dir="."):
                                     output_dir=".", sigclip_pipe=None):
     """
     Runs Qwen inference on a single image and parses the output.
@@ -987,7 +990,120 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
 
         set_seed(args.seed)
         
-        raw_output_i, input_width, input_height, outputs_probs = run_model_with_retries(args, model, processor, original_image, dataset_instructions, class_name)
+        try:
+            # raw_output_i = run_qwen_inference(
+            raw_output_i, input_width, input_height = run_qwen_inference(
+                args,
+                model, processor,
+                # image_path=image_path,
+                image=original_image,
+                dataset_instructions=dataset_instructions,
+                class_name=class_name,
+            )
+
+        except torch.cuda.OutOfMemoryError as e:
+            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
+
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            # max_dimension = (1920, 1080)
+            resized_image = original_image.resize(
+                # (width // 2, height // 2),
+                (1920, 1080),
+                Image.Resampling.LANCZOS
+            )
+
+            try:
+                # Retry inference with downsized image
+                raw_output_i, input_width, input_height = run_qwen_inference(
+                    args,
+                    model, processor,
+                    image=resized_image,
+                    dataset_instructions=dataset_instructions,
+                    class_name=class_name,
+                )
+                print("✅ Retry succeeded with downsized image.")
+
+            except torch.cuda.OutOfMemoryError:
+                print("❌ Still OOM after downsizing. Skipping this image.")
+                torch.cuda.empty_cache()
+                raw_output_i, input_width, input_height = '', None, None
+
+
+        except Exception as e:
+            print(f"❌ Unexpected error during inference: {e}")
+            # raw_output_i, input_width, input_height = '', None, None
+
+            print("Retrying with downsized image...")
+
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            # max_dimension = (1920, 1080)
+            resized_image = original_image.resize(
+                # (width // 2, height // 2),
+                (1920, 1080),
+                Image.Resampling.LANCZOS
+            )
+
+            try:
+                # Retry inference with downsized image
+                raw_output_i, input_width, input_height = run_qwen_inference(
+                    args,
+                    model, processor,
+                    image=resized_image,
+                    dataset_instructions=dataset_instructions,
+                    class_name=class_name,
+                )
+                print("✅ Retry succeeded with downsized image.")
+
+            # except torch.cuda.OutOfMemoryError:
+            #     print("❌ Still OOM after downsizing. Skipping this image.")
+            #     torch.cuda.empty_cache()
+            #     raw_output_i, input_width, input_height = '', None, None
+            except Exception as e:
+                print(f"❌ Unexpected error during inference: {e}")
+                # raw_output_i, input_width, input_height = '', None, None
+
+                print("Retrying with downsized image...")
+
+                # Free up GPU memory
+                torch.cuda.empty_cache()
+
+                # Downsize image by 50% (you can adjust this factor)
+                width, height = original_image.size
+                # max_dimension = (1920, 1080)
+                resized_image = original_image.resize(
+                    # (width // 2, height // 2),
+                    # (1920, 1080),
+                    # (1600, 900),
+                    (1280, 720),
+                    Image.Resampling.LANCZOS
+                )
+
+                try:
+                    # Retry inference with downsized image
+                    raw_output_i, input_width, input_height = run_qwen_inference(
+                        args,
+                        model, processor,
+                        image=resized_image,
+                        dataset_instructions=dataset_instructions,
+                        class_name=class_name,
+                    )
+                    print("✅ Retry succeeded with downsized image.")
+
+                # except torch.cuda.OutOfMemoryError:
+                #     print("❌ Still OOM after downsizing. Skipping this image.")
+                #     torch.cuda.empty_cache()
+                #     raw_output_i, input_width, input_height = '', None, None
+                except Exception as e:
+                    print(f"❌ Unexpected error during inference: {e}")
+                    raw_output_i, input_width, input_height = '', None, None
         
         parsed_bboxes_i = parse_qwen_output_to_detections(raw_output_i, [class_name], output_dir=output_dir)
 
@@ -1026,21 +1142,8 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
            
     # --- VQA-based Re-scoring ---
     # Create copies for different evaluation paths
-    detections_model = [det.copy() for det in parsed_bboxes]
-    detections_vqa = []
-
-
-    if args.rank_rescore and parsed_bboxes:
-        
-        # Assign new scores based on ranking order of detection bboxes - decending order have higher scores
-        detections_ranking = assign_score_based_on_ranking(parsed_bboxes, max_score=1.0, min_score=0.1)
-
-
-    if args.rating_rescore and parsed_bboxes:
-        
-        # Assign new scores based on ranking order of detection bboxes - decending order have higher scores
-        detections_ranking = assign_score_based_on_rating(processor, parsed_bboxes, raw_text=raw_output_i, token_probs=outputs_probs)
-
+    detections_orig_no_nms = [det.copy() for det in parsed_bboxes]
+    detections_vqa_no_nms = []
 
     if args.vqa_rescore and parsed_bboxes:
         # original_image = Image.open(image_path).convert("RGB")
@@ -1059,19 +1162,20 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
                 model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             )
 
-        except Exception as e:
-            print(f"❌ Unexpected error during inference: {e}")
+        except torch.cuda.OutOfMemoryError as e:
+            print("⚠️ CUDA OOM encountered. Retrying with downsized image...")
 
-            print("Retrying with downsized image...")
-        
             # Free up GPU memory
             torch.cuda.empty_cache()
 
             # Downsize image by 50% (you can adjust this factor)
             width, height = original_image.size
+            # max_dimension = (1920, 1080)
             vqa_images_small = []
             for img in vqa_images:
-                img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+                img_width, img_height = img.size
+                if img_width > 1920 or img_height > 1080:
+                    img.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
                 vqa_images_small.append(img)
             vqa_images = vqa_images_small
 
@@ -1082,15 +1186,19 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
                 )
                 print("✅ Retry succeeded with downsized image.")
 
-            except Exception as e:
-                print(f"❌ Unexpected error during inference: {e}")
+            except torch.cuda.OutOfMemoryError:
+                print("❌ Still OOM after downsizing. Skipping this image.")
                 torch.cuda.empty_cache()
                 vqa_scores = [-1] * len(parsed_bboxes)
+
+        except Exception as e:
+            print(f"❌ Unexpected error during inference: {e}")
+            vqa_scores = [-1] * len(parsed_bboxes)
         
-        detections_vqa = [det.copy() for det in detections_model]
+        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
 
         # Replace original scores with VQA scores
-        for i, det in enumerate(detections_vqa):
+        for i, det in enumerate(detections_vqa_no_nms):
             det["model_score"] = det["score"]  # Keep original model score for reference
             det["vqa_score"] = vqa_scores[i]
             det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
@@ -1098,9 +1206,9 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     # --- SigClip-based Re-scoring --- 
     elif args.siglip_rescore and parsed_bboxes:
 
-        detections_sigclip = [det.copy() for det in detections_model]
+        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
 
-        for i, det in enumerate(detections_sigclip):
+        for i, det in enumerate(detections_vqa_no_nms):
             det["model_score"] = det["score"]  # Keep original model score for reference
 
             #Crop the detected bbox region from the original image
@@ -1117,23 +1225,20 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         
     else:
         # If not VQA-rescoring, the VQA-based lists are the same as original
-        detections_vqa = [det.copy() for det in detections_model]
+        detections_vqa_no_nms = [det.copy() for det in detections_orig_no_nms]
     
     # --- End of VQA-based Re-scoring ---
 
-    # # --- Non-Maximum Suppression ---
-    # detections_orig_with_nms = apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
-    # detections_vqa_with_nms = apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
-    # # --- End of NMS ---
+    # --- Non-Maximum Suppression ---
+    detections_orig_with_nms = apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
+    detections_vqa_with_nms = apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
+    # --- End of NMS ---
 
     return raw_output, {
-        "model": detections_model,
-        # "orig_with_nms": detections_orig_with_nms,
-        "vqa": detections_vqa,
-        # "vqa_with_nms": detections_vqa_with_nms,
-        # "sigclip": detections_sigclip,
-        # "sigclip_with_nms": detections_sigclip_with_nms,
-        "ranking": detections_ranking if args.rank_rescore else None,
+        "orig_no_nms": detections_orig_no_nms,
+        "orig_with_nms": detections_orig_with_nms,
+        "vqa_no_nms": detections_vqa_no_nms,
+        "vqa_with_nms": detections_vqa_with_nms,
     }
 
 
