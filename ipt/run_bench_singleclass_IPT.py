@@ -1112,7 +1112,7 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
                                 ["original_instructions", "initial_instructions", "best_instructions", "final_refined_instructions", "altered_best_instruction"]):
 
         run_name = f"class_{class_name}_instr_name_{instr_name}"
-        results_dir = f"{dataset_result_dir}_class_{class_name}_{instr_name}_valSet_eval"
+        results_dir = f"{dataset_result_dir}/class_{class_name}_{instr_name}_valSet_eval"
         
 
         current_instructions_json = {class_name: instr}
@@ -1343,7 +1343,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
             # --- Step 2: Evaluate with the current prompt ---
             all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
                         model, iter, processor, class_name, cat_id, current_instructions, 
-                        dataset_name, dataset_path, f"{dataset_result_dir}_iter{iter}", coco_gt, sigclip_pipe,
+                        dataset_name, dataset_path, f"{dataset_result_dir}/{class_name}_iter{iter}", coco_gt, sigclip_pipe,
                         iter, instruction_refinements,
                         best_instructions, best_mAP,
                         prev_instructions, prev_mAP,
