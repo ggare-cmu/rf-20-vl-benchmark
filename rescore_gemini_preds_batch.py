@@ -311,6 +311,7 @@ def main():
     # ---- Process each dataset ----
     succeeded = 0
     failed = 0
+    failed_log = "failed_datasets.txt"
 
     for dataset_name, instructions_path in valid_datasets:
         try:
@@ -323,13 +324,22 @@ def main():
                 succeeded += 1
             else:
                 failed += 1
+                with open(failed_log, "a") as f:
+                    f.write(f"{dataset_name}\tdownload_or_data_error\n")
         except Exception as e:
-            print(f"\n[ERR] Failed on {dataset_name}: {e}")
+            error_msg = str(e)
+            print(f"\n[ERR] Failed on {dataset_name}: {error_msg}")
             import traceback; traceback.print_exc()
             failed += 1
+            with open(failed_log, "a") as f:
+                f.write(f"{dataset_name}\t{error_msg}\n")
+            # Continue to next dataset
+            continue
 
     print(f"\n{'='*60}")
     print(f"Batch complete: {succeeded} succeeded, {failed} failed, {len(datasets) - len(valid_datasets)} skipped")
+    if failed > 0:
+        print(f"Failed datasets logged to: {failed_log}")
     print(f"{'='*60}")
 
 
