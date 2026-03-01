@@ -3,7 +3,7 @@ Run cmd: CUDA_VISIBLE_DEVICES=0,1 python ipt/run_bench_singleclass_evaluator.py 
 '''
 
 import os
-from tkinter import Image
+from PIL import Image
 # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
