@@ -1324,73 +1324,79 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
 
         if start_iteration >= num_iterations:
             print(f"All {num_iterations} iterations already completed for class '{class_name}'. Skipping.")
-            continue
-
-        
-        iter_instructions = "" #No iter instru at index-0 as we haven't done any iterations yet 
-
-        for iter in range(start_iteration, num_iterations+1):
-
-            print(f"\n\n\n--- Iteration {iter} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
-
-            # stats_type = "model"
-            # stats_type = "vqa"
-            stats_type = "ranking"
-            # stats_type = "rating"
-            # stats_type = "ranking_rating_sum"
-            # stats_type = "ranking_rating_prod"
-
-
-            # --- Step 2: Evaluate with the current prompt ---
-            all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
-                        model, iter, processor, class_name, cat_id, current_instructions, 
-                        dataset_name, dataset_path, f"{dataset_result_dir}/{class_name}_iter{iter}", coco_gt, sigclip_pipe,
-                        iter, instruction_refinements,
-                        best_instructions, best_mAP,
-                        prev_instructions, prev_mAP,
-                        num_samples=None,
-                        stats_type=stats_type
-            )
-
-            # Display the analysis
             
-            # --- Iteration-level Save for Resume ---
-            print(f"Finished iteration {iter} for class '{class_name}'. Saving state.")
-            iteration_state = {
-                "last_completed_iteration": iter,
-                "current_instructions": current_instructions,
-                "best_instructions": best_instructions,
-                "best_mAP": best_mAP,
-                "prev_mAP": prev_mAP,
-                "current_mAP": current_mAP,
-                "prev_instructions": prev_instructions,
-                "iter_instructions": iter_instructions,
-                "instruction_refinements": instruction_refinements,
-            }
-            with open(iteration_state_path, "w", encoding="utf-8") as f:
-                json.dump(iteration_state, f, indent=2)
-            print(f"Saved iteration state to {iteration_state_path}")
+            valSet_best_instructions_path = os.path.join(dataset_result_dir, f"valSet_best_instructions_{dataset_name}_cls_{class_name}.txt")
+            if os.path.exists(valSet_best_instructions_path):
+                print(f"Val set evaluation already completed for class '{class_name}'. Skipping.")
 
-            if iter == num_iterations:
-                print(f"Reached the maximum number of iterations ({num_iterations}) for class '{class_name}'. Stopping refinement.")
-                break
+                continue
 
+        else:
+                
+            iter_instructions = "" #No iter instru at index-0 as we haven't done any iterations yet 
 
-            # --- Step 3: Identify worst-performing examples (simplified) ---
-            # A simple heuristic: find images with the most false negatives (missed GT objects).
-            few_shot_examples, prev_worst_examples_map = method_identify_worst_performing_examples(
-                        all_results_for_iter, iter, cat_id, class_name, dataset_result_dir,
-                        prev_worst_examples_map, stats_type=stats_type)
+            for iter in range(start_iteration, num_iterations+1):
+
+                print(f"\n\n\n--- Iteration {iter} for class '{class_name}' [{ds_cat_ids.index(cat_id)+1}/{len(ds_cat_ids)}] ---\n\n\n")
+
+                # stats_type = "model"
+                # stats_type = "vqa"
+                stats_type = "ranking"
+                # stats_type = "rating"
+                # stats_type = "ranking_rating_sum"
+                # stats_type = "ranking_rating_prod"
 
 
-            # --- Step 4: Refine prompt for next iteration ---
-            current_instructions = method_refine_prompt(args, model, processor, 
-                        class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = iter)
-            
-            iter_instructions = current_instructions
-            
+                # --- Step 2: Evaluate with the current prompt ---
+                all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
+                            model, iter, processor, class_name, cat_id, current_instructions, 
+                            dataset_name, dataset_path, f"{dataset_result_dir}/{class_name}_iter{iter}", coco_gt, sigclip_pipe,
+                            iter, instruction_refinements,
+                            best_instructions, best_mAP,
+                            prev_instructions, prev_mAP,
+                            num_samples=None,
+                            stats_type=stats_type
+                )
 
-            
+                # Display the analysis
+                
+                # --- Iteration-level Save for Resume ---
+                print(f"Finished iteration {iter} for class '{class_name}'. Saving state.")
+                iteration_state = {
+                    "last_completed_iteration": iter,
+                    "current_instructions": current_instructions,
+                    "best_instructions": best_instructions,
+                    "best_mAP": best_mAP,
+                    "prev_mAP": prev_mAP,
+                    "current_mAP": current_mAP,
+                    "prev_instructions": prev_instructions,
+                    "iter_instructions": iter_instructions,
+                    "instruction_refinements": instruction_refinements,
+                }
+                with open(iteration_state_path, "w", encoding="utf-8") as f:
+                    json.dump(iteration_state, f, indent=2)
+                print(f"Saved iteration state to {iteration_state_path}")
+
+                if iter == num_iterations:
+                    print(f"Reached the maximum number of iterations ({num_iterations}) for class '{class_name}'. Stopping refinement.")
+                    break
+
+
+                # --- Step 3: Identify worst-performing examples (simplified) ---
+                # A simple heuristic: find images with the most false negatives (missed GT objects).
+                few_shot_examples, prev_worst_examples_map = method_identify_worst_performing_examples(
+                            all_results_for_iter, iter, cat_id, class_name, dataset_result_dir,
+                            prev_worst_examples_map, stats_type=stats_type)
+
+
+                # --- Step 4: Refine prompt for next iteration ---
+                current_instructions = method_refine_prompt(args, model, processor, 
+                            class_name, current_instructions, few_shot_examples, dataset_result_dir, iter = iter)
+                
+                iter_instructions = current_instructions
+                
+
+                
 
         #Display Initial Instructions
         
