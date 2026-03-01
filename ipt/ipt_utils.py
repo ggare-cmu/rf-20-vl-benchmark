@@ -1190,6 +1190,125 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     }
 
 
+
+
+def run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_bboxes, sigclip_pipe=None):
+    """
+    Runs VQA rescoring of bbox confidence scores on a single image. This is a separate function from run_inference_on_single_image to allow for modularity and to enable running just the rescoring step on pre-parsed bboxes without having to re-run the entire Qwen inference.
+    """
+    set_seed(args.seed)
+
+    original_image = Image.open(image_path).convert("RGB")
+    #Check image size
+    width, height = original_image.size
+    print(f"Original image size: {width}x{height}")
+
+    max_dimension = (2880, 1620)
+    if width > max_dimension[0] or height > max_dimension[1]:
+
+        # get the appropriate max dimension while maintaining aspect ratio
+        max_dimension = getMaxInputSizeForQwen(width, height, max_dimension)
+        
+        if width > max_dimension[0] or height > max_dimension[1]:
+
+            print(f"Resizing image from {width}x{height} to fit within {max_dimension[0]}x{max_dimension[1]}")
+            original_image = original_image.resize(
+                max_dimension,
+                Image.Resampling.LANCZOS
+            )
+            width, height = original_image.size
+            print(f"Resized image size: {width}x{height}")
+
+    
+    # --- VQA-based Re-scoring ---
+    # Create copies for different evaluation paths
+
+    if args.vqa_rescore and parsed_bboxes:
+        # original_image = Image.open(image_path).convert("RGB")
+        
+        # # Create a list of images, each with one bounding box drawn
+        vqa_images = [create_img_with_bbox(original_image, det["bbox"]) for det in parsed_bboxes]
+        
+        # Get VQA scores for all bboxes in a single batch call
+        # We use the category name of the first detection as the prompt for the whole batch,
+        # assuming all detections in this context are for the same class.
+        # vqa_prompt = parsed_bboxes[0]["category_name"]
+        vqa_prompts = [det["category_name"] for det in parsed_bboxes]
+       
+        try:
+            vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            )
+
+        except Exception as e:
+            print(f"❌ Unexpected error during inference: {e}")
+
+            print("Retrying with downsized image...")
+        
+            # Free up GPU memory
+            torch.cuda.empty_cache()
+
+            # Downsize image by 50% (you can adjust this factor)
+            width, height = original_image.size
+            vqa_images_small = []
+            for img in vqa_images:
+                img.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+                vqa_images_small.append(img)
+            vqa_images = vqa_images_small
+
+
+            try:
+                vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                )
+                print("✅ Retry succeeded with downsized image.")
+
+            except Exception as e:
+                print(f"❌ Unexpected error during inference: {e}")
+                torch.cuda.empty_cache()
+                vqa_scores = [-1] * len(parsed_bboxes)
+        
+        detections_vqa = [det.copy() for det in parsed_bboxes]
+
+        # Replace original scores with VQA scores
+        for i, det in enumerate(detections_vqa):
+            # det["model_score"] = det["score"]  # Keep original model score for reference
+            det["vqa_score"] = vqa_scores[i]
+            det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
+
+    # --- SigClip-based Re-scoring --- 
+    elif args.siglip_rescore and parsed_bboxes:
+
+        detections_sigclip = [det.copy() for det in parsed_bboxes]
+
+        for i, det in enumerate(detections_sigclip):
+            det["model_score"] = det["score"]  # Keep original model score for reference
+
+            #Crop the detected bbox region from the original image
+            x, y, w, h = map(int, det["bbox"])
+            if w == 0 or h == 0: continue #skip invalid bbox
+            cropped_img = original_image.crop((x, y, x + w, y + h))
+            # #save cropped image for debugging
+            # cropped_img.save(f"cropped_det_{i}.png")
+
+            sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
+
+            det["siglip_score"] = sigclip_score
+            det["score"] = sigclip_score
+        
+    else:
+        raise ValueError("No rescoring method specified or parsed_bboxes is empty. Please provide valid parsed_bboxes and specify either vqa_rescore or siglip_rescore in args.")
+    
+    # --- End of VQA-based Re-scoring ---
+
+    # # --- Non-Maximum Suppression ---
+    # detections_orig_with_nms = apply_nms(detections_orig_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_orig_no_nms
+    # detections_vqa_with_nms = apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
+    # # --- End of NMS ---
+
+    return {"vqa": detections_vqa} if args.vqa_rescore else {"sigclip": detections_sigclip}
+
+
 # Drawing utils
 
 
