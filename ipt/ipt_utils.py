@@ -1340,12 +1340,12 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
         try:
-            # vqa_scores = get_masked_image_vqa_scores_with_instructions(
-            #     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-            # )
-            vqa_scores = get_masked_image_vqa_scores(
-                model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             )
+            # vqa_scores = get_masked_image_vqa_scores(
+            #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            # )
 
         except Exception as e:
             print(f"❌ Unexpected error during inference: {e}")
@@ -1365,12 +1365,12 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
 
 
             try:
-                # vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                #         model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
-                # )
-                vqa_scores = get_masked_image_vqa_scores(
-                    model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
                 )
+                # vqa_scores = get_masked_image_vqa_scores(
+                #     model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                # )
                 print("✅ Retry succeeded with downsized image.")
 
             except Exception as e:
