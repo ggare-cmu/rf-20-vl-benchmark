@@ -150,12 +150,23 @@ def rescore_dataset(args, model, processor, dataset_path, data_instr_path,
                 image_path = prediction["image_path"]
 
                 all_detections = utils.run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_detections_ranking, sigclip_pipe)
-            
+             
 
-                if args.vqa_rescore:
-                    detections_all_by_type["vqa"].extend(all_detections["vqa"])
-                if args.siglip_rescore:
-                    detections_all_by_type["siglip"].extend(all_detections["siglip"])
+                for eval_type, detections in all_detections.items():
+                    for det in detections:
+                        detections_all_by_type[eval_type].append({
+                            "image_id": prediction["img_id"],
+                            "category_id": cat_name2id_dict.get(det["category_name"], -1),
+                            "bbox": det["bbox"],
+                            "score": det["score"],
+                            "image_path": image_path,
+                            "category_name": det["category_name"],
+                            "model_score": det.get("model_score", None),
+                            "vqa_score": det.get("vqa_score", None),
+                            "ranking_score": det.get("ranking_score", None),
+                            "sigclip_score": det.get("sigclip_score", None),
+                            "bbox_model_xyxy": det.get("bbox_model_xyxy", None)
+                        })
                 
                 total_count += 1
 
