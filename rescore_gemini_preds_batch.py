@@ -109,6 +109,15 @@ def resolve_instructions(gcs_instructions, dataset_name, local_tmp_root):
     return None
 
 
+def check_gcs_exists(gcs_path):
+    """Check if a GCS file exists."""
+    result = subprocess.run(
+        ["gsutil", "ls", gcs_path],
+        capture_output=True, text=True
+    )
+    return result.returncode == 0
+
+
 def rescore_dataset(qwen_model, qwen_processor, gcs_experiment, dataset_name,
                     datasets_root, instructions_json_path):
     """Rescore a single dataset: download preds, run Step 2 + Step 3, upload results."""
@@ -127,6 +136,13 @@ def rescore_dataset(qwen_model, qwen_processor, gcs_experiment, dataset_name,
         return False
 
     run_name = "/".join(parts[1:results_idx])
+
+    # Check if both step2 and step3 results already exist — skip if so
+    step2_gcs = f"{bucket}/{run_name}_step2_rating/results/{dataset_name}/gemini_detection_results.json"
+    step3_gcs = f"{bucket}/{run_name}_step3_vqa/results/{dataset_name}/gemini_detection_results.json"
+    if check_gcs_exists(step2_gcs) and check_gcs_exists(step3_gcs):
+        print(f"\n  [SKIP] {dataset_name} — step2 and step3 results already exist on GCS")
+        return True
 
     print(f"\n{'='*60}")
     print(f"  Dataset:      {dataset_name}")
