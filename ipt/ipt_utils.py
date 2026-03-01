@@ -277,6 +277,110 @@ def rescore_with_sigclip(sigclip_pipe, pil_image, candidate_label):
 
 import numpy as np
 
+def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_images: list, batch_size: int = 8):
+    """
+    Scores a batch of images with bounding boxes based on a VQA prompt.
+    This function is adapted from GridVQAscores_withSavedSAMProposal_webUI_RefCOCO_officialEval_saveInterimResults_gridWeightedBBox.py
+    """
+    # if not pil_images: return np.array([])
+    
+    def getPrompt(prompt):
+        # question = f"Is the main subject or object being referred to in this sentence: '{prompt}' located inside the red bounding box in the image? Please answer yes or no. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
+        question = f"Is the main subject or object being referred to as: '{prompt}' located inside the red bounding box in the image? Please answer Yes or No. Note: The object should be entirely inside the bounding box, with no part outside, and it must be the only object present inside - no other objects should appear within the box."
+        return question
+
+
+    all_final_scores = []
+    # Process images in batches
+    for i in range(0, len(pil_images)):
+        img = pil_images[i]
+        prompt = prompt_list[i]
+        
+        # Create conversations for the batch
+        messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}]
+        
+        # Generate outputs with scores
+        outputs = model_generate_with_scores(messages, qwen_model, qwen_processor)
+
+        # # Calculate 'Yes' probability
+        # scores = outputs.scores[0]
+        # probs = torch.nn.functional.softmax(scores, dim=-1)
+        
+        # yes_probs, no_probs = probs[:, yes_token_id], probs[:, no_token_id]
+        # batch_scores = (yes_probs / (yes_probs + no_probs + 1e-18)).cpu().numpy()
+        # all_final_scores.extend(batch_scores.tolist())
+
+        # print(f"Len of outputs: {len(outputs)}; outputs: {outputs}")
+        # print(f"Len of outputs: {len(outputs)};")
+        assert len(outputs) == 1, "Error: Expected single output for single input."
+
+
+        # for output in outputs:
+        #     # Access the generated tokens' logprobs
+        #     for completion_output in output.outputs:
+        #         # cumulative log probability of the entire generated sequence
+        #         cumulative_logprob = completion_output.cumulative_logprob
+
+        #         # detailed logprobs for each token (a list of dictionaries)
+        #         token_logprobs = completion_output.logprobs
+
+        #         for i, logprob_dict in enumerate(token_logprobs):
+        #             token_id = completion_output.token_ids[i]
+        #             # Each logprob_dict maps token IDs to their logprobs for that position
+        #             print(f"Token ID: {token_id}, Logprob: {logprob_dict.get(token_id)}")
+
+
+        # for output in outputs:
+        # token_logprobs = outputs.outputs[0].logprobs  # list[dict]
+        # token_logprobs = outputs[0].logprobs  # list[dict]
+        # token_logprobs = [v for v in outputs[0].outputs[0].logprobs[0].values()][0]  # list[dict]
+        token_logprobs = outputs[0].outputs[0].logprobs[0]  # list[dict]
+        # print(f"token_logprobs: {token_logprobs}")
+
+
+        # Initialize scores
+        yes_logprob = None
+        no_logprob = None
+
+        # Look through generated tokens and their top_logprobs
+        for token_id, token_info in token_logprobs.items():
+            # top_logprobs = token_info["top_logprobs"]
+            logprob = token_info.logprob
+            decoded_token = token_info.decoded_token
+            # print(f"Decoded token: {decoded_token}: logprob: {logprob}, token_id: {token_id}")
+
+            if "Yes" == decoded_token:
+                yes_logprob = logprob
+            if yes_logprob is None and "yes" == decoded_token:
+                yes_logprob = logprob
+
+            if "No" == decoded_token:
+                no_logprob = logprob
+            if no_logprob is None and "no" == decoded_token:
+                no_logprob = logprob
+
+        # If neither found, skip
+        if yes_logprob is None and no_logprob is None:
+            all_final_scores.append(-1.0)
+            continue
+        if yes_logprob is None:
+            no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
+            yes_prob = 1 - no_prob
+            score = yes_prob.item()
+            all_final_scores.append(score)
+            continue
+
+        # Convert from logprobs to probabilities
+        yes_prob = torch.exp(torch.tensor(yes_logprob)) if yes_logprob is not None else torch.tensor(0.0)
+        no_prob = torch.exp(torch.tensor(no_logprob)) if no_logprob is not None else torch.tensor(0.0)
+
+        # Normalize to get P(Yes)
+        score = yes_prob / (yes_prob + no_prob + 1e-18)
+        all_final_scores.append(score.item())
+    
+    return np.array(all_final_scores)
+
+
 def get_masked_image_vqa_scores_with_instructions(qwen_model, qwen_processor, dataset_instructions_json, prompt_list, pil_images: list, batch_size: int = 8):
     """
     Scores a batch of images with bounding boxes based on a VQA prompt.
@@ -1236,8 +1340,11 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
         vqa_prompts = [det["category_name"] for det in parsed_bboxes]
        
         try:
-            vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            # vqa_scores = get_masked_image_vqa_scores_with_instructions(
+            #     model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+            # )
+            vqa_scores = get_masked_image_vqa_scores(
+                model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
             )
 
         except Exception as e:
@@ -1258,8 +1365,11 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
 
 
             try:
-                vqa_scores = get_masked_image_vqa_scores_with_instructions(
-                        model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                # vqa_scores = get_masked_image_vqa_scores_with_instructions(
+                #         model, processor, dataset_instructions_json, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
+                # )
+                vqa_scores = get_masked_image_vqa_scores(
+                    model, processor, vqa_prompts, vqa_images, batch_size=args.vqa_batch_size
                 )
                 print("✅ Retry succeeded with downsized image.")
 
