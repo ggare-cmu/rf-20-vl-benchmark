@@ -13,7 +13,7 @@ MODEL_NAME="Qwen3-VL-30B-A3B-Instruct"
 
 RESULTSDIR="results/eccv26/rf100vl_IPT/$MODEL_NAME/rf20_IPT_singleclass_rankScore"
 CMD_TEMPLATE="python3 ipt/run_rescorer.py --model_name $MODEL_NAME --vqa_rescore --data_instr_type ipt --output_dir $RESULTSDIR"
-CMD_TEMPLATE="CUDA_VISIBLE_DEVICES=4,5,6,7 /data3/shared/scripts/vnice/vnice.sh python3 ipt/run_rescorer.py --model_name $MODEL_NAME --vqa_rescore --data_instr_type ipt --output_dir $RESULTSDIR"
+# CMD_TEMPLATE="CUDA_VISIBLE_DEVICES=4,5,6,7 /data3/shared/scripts/vnice/vnice.sh python3 ipt/run_rescorer.py --model_name $MODEL_NAME --vqa_rescore --data_instr_type ipt --output_dir $RESULTSDIR"
 # CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate qwen-vllm-env && python ipt/1run_rescorer.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 # CMD_TEMPLATE="python ipt/1run_rescorer.py --model_name Qwen3-VL-235B-A22B-Instruct-FP8 --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT/Qwen3-VL-235B-A22B-Instruct-FP8/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1"
 
