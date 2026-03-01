@@ -297,7 +297,7 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         prompt = prompt_list[i]
         
         # Create conversations for the batch
-        messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt, dataset_instructions_json)}]}]
+        messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}]
         
         # Generate outputs with scores
         outputs = model_generate_with_scores(messages, qwen_model, qwen_processor)
