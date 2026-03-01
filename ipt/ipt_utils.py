@@ -300,7 +300,7 @@ def get_masked_image_vqa_scores(qwen_model, qwen_processor, prompt_list, pil_ima
         messages = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": getPrompt(prompt)}]}]
         
         # Generate outputs with scores
-        outputs = model_generate_with_scores(messages, qwen_model, qwen_processor)
+        output_text, inputs_org, outputs = model_generate_with_scores(messages, qwen_model, qwen_processor)
 
         # # Calculate 'Yes' probability
         # scores = outputs.scores[0]
