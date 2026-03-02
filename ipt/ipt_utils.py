@@ -48,7 +48,7 @@ def set_seed(seed):
 
 
 
-def load_sigclip_pipeline():
+def load_siglip_pipeline():
     # ckpt = "google/siglip2-so400m-patch14-384"
     ckpt = "google/siglip2-base-patch16-naflex"
     pipe = pipeline(model=ckpt, task="zero-shot-image-classification")
@@ -263,10 +263,10 @@ def model_generate_with_scores(conversations, model, processor, max_new_tokens=1
 
 # Siglip utils
 
-def rescore_with_sigclip(sigclip_pipe, pil_image, candidate_label):
-    output = sigclip_pipe(pil_image, candidate_labels=[candidate_label])
-    # print(f"SigClip output: {output} for label: {candidate_label}")
-    assert len(output) == 1, "Error: SigClip output length is not 1."
+def rescore_with_siglip(siglip_pipe, pil_image, candidate_label):
+    output = siglip_pipe(pil_image, candidate_labels=[candidate_label])
+    # print(f"siglip output: {output} for label: {candidate_label}")
+    assert len(output) == 1, "Error: SigLip output length is not 1."
 
     label_score = output[0]['score']
 
@@ -1093,7 +1093,7 @@ def run_model_with_retries(args, model, processor, original_image, dataset_instr
 
 
 def run_inference_on_single_image(args, model, processor, image_path, dataset_instructions_json, class_name_list, 
-                                    output_dir=".", sigclip_pipe=None):
+                                    output_dir=".", siglip_pipe=None):
     """
     Runs Qwen inference on a single image and parses the output.
     """
@@ -1252,12 +1252,12 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     #         det["vqa_score"] = vqa_scores[i]
     #         det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
 
-    # # --- SigClip-based Re-scoring --- 
+    # # --- siglip-based Re-scoring --- 
     # elif args.siglip_rescore and parsed_bboxes:
 
-    #     detections_sigclip = [det.copy() for det in detections_model]
+    #     detections_siglip = [det.copy() for det in detections_model]
 
-    #     for i, det in enumerate(detections_sigclip):
+    #     for i, det in enumerate(detections_siglip):
     #         det["model_score"] = det["score"]  # Keep original model score for reference
 
     #         #Crop the detected bbox region from the original image
@@ -1267,10 +1267,10 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
     #         # #save cropped image for debugging
     #         # cropped_img.save(f"cropped_det_{i}.png")
 
-    #         sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
+    #         siglip_score = rescore_with_siglip(siglip_pipe, cropped_img, det["category_name"])
 
-    #         det["siglip_score"] = sigclip_score
-    #         det["score"] = sigclip_score
+    #         det["siglip_score"] = siglip_score
+    #         det["score"] = siglip_score
         
     # else:
     #     # If not VQA-rescoring, the VQA-based lists are the same as original
@@ -1288,15 +1288,15 @@ def run_inference_on_single_image(args, model, processor, image_path, dataset_in
         # "orig_with_nms": detections_orig_with_nms,
         # "vqa": detections_vqa,
         # "vqa_with_nms": detections_vqa_with_nms,
-        # "sigclip": detections_sigclip,
-        # "sigclip_with_nms": detections_sigclip_with_nms,
+        # "siglip": detections_siglip,
+        # "siglip_with_nms": detections_siglip_with_nms,
         "ranking": detections_ranking if args.rank_rescore else None,
     }
 
 
 
 
-def run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_bboxes, sigclip_pipe=None):
+def run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_bboxes, siglip_pipe=None):
     """
     Runs VQA rescoring of bbox confidence scores on a single image. This is a separate function from run_inference_on_single_image to allow for modularity and to enable running just the rescoring step on pre-parsed bboxes without having to re-run the entire Qwen inference.
     """
@@ -1386,12 +1386,12 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
             det["vqa_score"] = vqa_scores[i]
             det["score"] = vqa_scores[i] if vqa_scores[i] != -1 else det["score"]
 
-    # --- SigClip-based Re-scoring --- 
+    # --- SigLip-based Re-scoring --- 
     elif args.siglip_rescore and parsed_bboxes:
 
-        detections_sigclip = [det.copy() for det in parsed_bboxes]
+        detections_siglip = [det.copy() for det in parsed_bboxes]
 
-        for i, det in enumerate(detections_sigclip):
+        for i, det in enumerate(detections_siglip):
             det["model_score"] = det["score"]  # Keep original model score for reference
 
             #Crop the detected bbox region from the original image
@@ -1401,10 +1401,10 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
             # #save cropped image for debugging
             # cropped_img.save(f"cropped_det_{i}.png")
 
-            sigclip_score = rescore_with_sigclip(sigclip_pipe, cropped_img, det["category_name"])
+            siglip_score = rescore_with_siglip(siglip_pipe, cropped_img, det["category_name"])
 
-            det["siglip_score"] = sigclip_score
-            det["score"] = sigclip_score
+            det["siglip_score"] = siglip_score
+            det["score"] = siglip_score
         
     else:
         raise ValueError("No rescoring method specified or parsed_bboxes is empty. Please provide valid parsed_bboxes and specify either vqa_rescore or siglip_rescore in args.")
@@ -1416,7 +1416,7 @@ def run_rescorer(args, model, processor, image_path, dataset_instructions_json, 
     # detections_vqa_with_nms = apply_nms(detections_vqa_no_nms, iou_threshold=args.nms_threshold) if args.apply_nms else detections_vqa_no_nms
     # # --- End of NMS ---
 
-    return {"vqa": detections_vqa} if args.vqa_rescore else {"sigclip": detections_sigclip}
+    return {"vqa": detections_vqa} if args.vqa_rescore else {"siglip": detections_siglip}
 
 
 # Drawing utils

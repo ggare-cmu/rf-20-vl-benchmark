@@ -29,7 +29,7 @@ import ipt_utils as utils
 
 
 def rescore_dataset(args, model, processor, dataset_path, data_instr_path,
-                     run_name="", output_dir="results", sigclip_pipe=None):
+                     run_name="", output_dir="results", siglip_pipe=None):
     
     test_dir = os.path.join(dataset_path, "test")
     ann_path = os.path.join(test_dir, "_annotations.coco.json")
@@ -149,7 +149,7 @@ def rescore_dataset(args, model, processor, dataset_path, data_instr_path,
                 
                 image_path = prediction["image_path"]
 
-                all_detections = utils.run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_detections_ranking, sigclip_pipe)
+                all_detections = utils.run_rescorer(args, model, processor, image_path, dataset_instructions_json, parsed_detections_ranking, siglip_pipe)
              
 
                 for eval_type, detections in all_detections.items():
@@ -164,7 +164,7 @@ def rescore_dataset(args, model, processor, dataset_path, data_instr_path,
                             "model_score": det.get("model_score", None),
                             "vqa_score": det.get("vqa_score", None),
                             "ranking_score": det.get("ranking_score", None),
-                            "sigclip_score": det.get("sigclip_score", None),
+                            "siglip_score": det.get("siglip_score", None),
                             "bbox_model_xyxy": det.get("bbox_model_xyxy", None)
                         })
                 
@@ -271,14 +271,14 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
             print("Using provided model and processor.")
 
     if args.siglip_rescore:
-        sigclip_pipe = utils.load_sigclip_pipeline()
-        print("Loaded SigClip pipeline for confidence scoring.")
+        siglip_pipe = utils.load_siglip_pipeline()
+        print("Loaded siglip pipeline for confidence scoring.")
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
 
     ds_stats = rescore_dataset(args, model, processor, dataset_path, data_instr_path, run_name=run_name, output_dir=output_dir,
-                                      sigclip_pipe=sigclip_pipe if args.siglip_rescore else None)
+                                      siglip_pipe=siglip_pipe if args.siglip_rescore else None)
 
 
     if ds_stats is not None:
@@ -288,12 +288,15 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
         # print(f"[ranking] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['ranking'][0]:.4f}")
         if args.vqa_rescore:
             print(f"[vqa] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['vqa'][0]:.4f}")
-
+        if args.siglip_rescore:
+            print(f"[siglip] mAP (AP50-95) for {os.path.basename(dataset_path)}: {ds_stats['siglip'][0]:.4f}")
         #AR@1
         # print(f"[model] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['model'][6]:.4f}")
         # print(f"[ranking] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['ranking'][6]:.4f}")
         if args.vqa_rescore:
             print(f"[vqa] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['vqa'][6]:.4f}")
+        if args.siglip_rescore:
+            print(f"[siglip] AR@1 for {os.path.basename(dataset_path)}: {ds_stats['siglip'][6]:.4f}")
 
     else:
         print(f"Evaluation failed for {dataset_path}")
