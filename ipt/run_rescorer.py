@@ -254,7 +254,9 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
     if args.data_instr_type == "ipt":
         data_instr_path =  os.path.join(exp_dir, "iterative_prompt_refinement", f"all_refined_class_instructions_{os.path.basename(dataset_path)}.json")
     elif args.data_instr_type == "default":
-        data_instr_path = os.path.join(dataset_path, "README.dataset.txt")
+        # data_instr_path = os.path.join(dataset_path, "README.dataset.txt")
+        data_instr_path = os.path.join("./data_instr/default", f"README.dataset_{os.path.basename(dataset_path)}.json")
+        run_name += "_defaultInstr"
     else:
         raise ValueError(f"Invalid data_instr_type: {args.data_instr_type}. Must be 'ipt' or 'default'.")
     
