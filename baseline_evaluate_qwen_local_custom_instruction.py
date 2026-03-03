@@ -349,8 +349,10 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
         logger.info(f"Using 'mipro' optimized instructions for dataset {dataset_name} from {args.instruction_path}")
         with open(os.path.join(args.instruction_path, f"{dataset_name}.json"), 'r') as f:
             instructions = json.load(f)
-        instructions_system_prompt = instructions["signature"]["instructions"]
-        final_query_text_instructions_standalone = instructions["prompt"]
+        # instructions_system_prompt = instructions["signature"]["instructions"]
+        # final_query_text_instructions_standalone = instructions["prompt"]
+        instructions_system_prompt = SYSTEM_PROMPT
+        final_query_text_instructions_standalone = instructions["signature"]["instructions"]
         logger.info(f"instructions: {final_query_text_instructions_standalone}\nsystem prompt: {instructions_system_prompt}")
     elif args.instruction_type == "default":
         readme_path = os.path.join(dataset_dir, "README.dataset.txt")
