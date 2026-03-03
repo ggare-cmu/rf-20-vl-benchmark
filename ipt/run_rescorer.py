@@ -247,6 +247,8 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
 
     if args.vqa_rescore:
         run_name = f"vqa"
+        if args.vqa_nocontext:
+            run_name += f"_nocontext"
     elif args.siglip_rescore:
         run_name = f"siglip"
 
@@ -319,6 +321,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='List of GPU IDs to use for processing. e.g. --gpu_ids 0 1 4')
     parser.add_argument('--vqa_batch_size', type=int, default=8, help='Batch size for VQA scoring of candidate masks.')
     parser.add_argument("--vqa_rescore", action="store_true", help="Use VQA-based re-scoring of candidate masks")
+    parser.add_argument("--vqa_nocontext", action="store_true", help="Use VQA-based re-scoring of candidate masks without class instruction context")
     parser.add_argument("--rank_rescore", action="store_true", help="Use Rank-based class re-scoring of candidate masks")
     parser.add_argument("--rating_rescore", action="store_true", help="Use Rating-based class re-scoring of candidate masks")
     parser.add_argument("--siglip_rescore", action="store_true", help="Use SigLip-based re-scoring of candidate masks")
