@@ -28,7 +28,7 @@ import ipt_utils as utils
 
 
 def evaluate_dataset(args, model, processor, dataset_path, 
-                     run_name="", output_dir="results", max_samples=None, sigclip_pipe=None):
+                     run_name="", output_dir="results", max_samples=None, siglip_pipe=None):
     test_dir = os.path.join(dataset_path, "test")
     ann_path = os.path.join(test_dir, "_annotations.coco.json")
     # readme_path = os.path.join(dataset_path, "README.dataset.txt")
@@ -151,7 +151,7 @@ def evaluate_dataset(args, model, processor, dataset_path,
                     dataset_instructions_json = dataset_instructions_json,
                     class_name_list=ds_cat_names, #GRG: Pass the entire list of category names
                     output_dir=output_dir,
-                    sigclip_pipe=sigclip_pipe,
+                    siglip_pipe=siglip_pipe,
                 )
 
                 for eval_type, detections in all_detections.items():
@@ -285,8 +285,8 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
         print("Using provided model and processor.")
 
     if args.siglip_rescore:
-        sigclip_pipe = utils.load_sigclip_pipeline()
-        print("Loaded SigClip pipeline for confidence scoring.")
+        siglip_pipe = utils.load_siglip_pipeline()
+        print("Loaded Siglip pipeline for confidence scoring.")
 
 
     print("=" * 60)
@@ -294,7 +294,7 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
 
     eval_generator = evaluate_dataset(args, model, processor, dataset_path, 
                                       run_name=run_name, output_dir=args.output_dir,
-                                      sigclip_pipe=sigclip_pipe if args.siglip_rescore else None)
+                                      siglip_pipe=siglip_pipe if args.siglip_rescore else None)
 
 
     # Collect live results yielded by the generator and save them to disk periodically
