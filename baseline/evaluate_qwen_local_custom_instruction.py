@@ -726,6 +726,7 @@ def process_dataset(args, model, processor, dataset_dir, few_shot, just_instruct
 
     return results_file, final_results_list, processed_count, error_count, skipped_count
 
+# cmd: python3 baseline/evaluate_qwen_local_custom_instruction.py --just_instructions --data_dir ./datasets/rf100-vl-fsod --model_name Qwen3-VL-30B-A3B-Instruct --save_dir results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_multiclass_instrc --vllm --instruction_type gepa --instruction_path ../dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20gepa_REF/
 def main():
     """Main function to process all datasets with different modes."""
     parser = argparse.ArgumentParser(description='Process datasets for object detection using Qwen')
