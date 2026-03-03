@@ -11,7 +11,7 @@ import argparse
 import pickle
 import copy
 from qwen_vl_utils import smart_resize #expects qwen-vl-utils==0.0.8
-from utils_v0.qwen_eval_utils import *
+from utils.qwen_eval_utils import *
 from utils.shared_eval_utils import *
 from utils.thinking_budget_processor import ThinkingTokenBudgetProcessor
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor, Qwen3VLForConditionalGeneration, Qwen3VLMoeForConditionalGeneration, AutoTokenizer
