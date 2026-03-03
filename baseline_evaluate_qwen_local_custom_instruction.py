@@ -339,7 +339,7 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
     if args.instruction_type == "gepa":
         #load json instructions
         logger.info(f"Using 'gepa' optimized instructions for dataset {dataset_name} from {args.instruction_path}")
-        with open(os.path.join(args.instruction_path, dataset_name), 'r') as f:
+        with open(os.path.join(args.instruction_path, f"{dataset_name}.json"), 'r') as f:
             instructions = json.load(f)
         instructions_system_prompt = SYSTEM_PROMPT
         final_query_text_instructions_standalone = instructions["signature"]["instructions"]
@@ -347,7 +347,7 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
     elif args.instruction_type == "mipro":
         #load json instructions
         logger.info(f"Using 'mipro' optimized instructions for dataset {dataset_name} from {args.instruction_path}")
-        with open(os.path.join(args.instruction_path, dataset_name), 'r') as f:
+        with open(os.path.join(args.instruction_path, f"{dataset_name}.json"), 'r') as f:
             instructions = json.load(f)
         instructions_system_prompt = instructions["signature"]["instructions"]
         final_query_text_instructions_standalone = instructions["prompt"]
