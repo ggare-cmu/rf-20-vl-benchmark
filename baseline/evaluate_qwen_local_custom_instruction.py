@@ -19,6 +19,9 @@ from qwen_vl_utils import process_vision_info
 import torch
 os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
 
+import sys
+sys.path.append("./utils")  # Ensure current directory is in the path for imports
+
 
 NUM_FEW_SHOT_EXAMPLES = 3
 # MODEL_NAME = "Qwen2.5-VL-7B-Instruct"
