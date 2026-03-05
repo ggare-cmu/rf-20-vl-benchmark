@@ -536,8 +536,9 @@ def main():
     parser.add_argument(
         "--score_type",
         type=str,
-        default="model",
-        help="Score type to evaluate: 'model', 'rank', etc.",
+        # default="model",
+        default="vqa",
+        help="Score type to evaluate: 'model', 'rank', 'vqa', etc.",
     )
     parser.add_argument(
         "--nms_iou_threshold",
@@ -651,7 +652,7 @@ def main():
         for k, v in all_errors.items():
             f.write("  " + "   ".join([f"{k:>{col_w[0]}}", f"{v:>{col_w[1]}.3f}"]) + "\n")
         f.write(div.replace("-", "=") + "\n") 
-        
+
     print(f"\n{'='*60}")
     print(f"Consolidated TIDE errors for {model_name}:")
     all_errors = {
