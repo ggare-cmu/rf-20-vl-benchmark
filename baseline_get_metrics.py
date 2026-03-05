@@ -8,9 +8,11 @@ from rf100vl.util import get_basename, get_category
 import numpy as np
 
 #GRPA
-RESULT_DIR = '../dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+# RESULT_DIR = 'results/final_consolidated_results/dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_'
+# RESULT_DIR = '../dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
 # #MiPro
-# RESULT_DIR = '../dspy-baselines/results/eccv26/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+RESULT_DIR = 'results/final_consolidated_results/dspy-baselines/results/eccv26/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+## RESULT_DIR = '../dspy-baselines/results/eccv26/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
 DATA_DIR = './datasets/rf100-vl-fsod'
 
 all_dataset_dirs = {os.path.basename(d) : d for d in glob.glob(os.path.join(DATA_DIR, "*"))
@@ -34,6 +36,11 @@ for d in os.listdir(RESULT_DIR):
     )
     with open(predictions_path, "r", encoding="utf-8") as f:
             detections_all = json.load(f)
+
+    if len(detections_all) == 0:
+        print(f"No detections for {dataset_name}, skipping evaluation.")
+        continue
+
     coco_dt = coco_gt.loadRes(detections_all)
     coco_eval = COCOeval(coco_gt, coco_dt, "bbox")
     coco_eval.evaluate()
