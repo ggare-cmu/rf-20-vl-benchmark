@@ -215,20 +215,6 @@ def rescore_dataset(args, dataset_path,
         all_stats[eval_type] = coco_eval.stats
 
 
-    # eval_results_path = os.path.join(
-    #     eval_dir, f"evaluation_{dataset_name}.json"
-    # )
-    
-    # # Convert numpy arrays to lists for JSON serialization
-    # serializable_stats = {
-    #     # eval_type: stats.tolist() for eval_type, stats in all_stats.items()
-    #     eval_type: stats.tolist() if hasattr(stats, "tolist") else stats for eval_type, stats in all_stats.items()
-    # }
-
-    # with open(eval_results_path, "w", encoding="utf-8") as f:
-    #     json.dump(serializable_stats, f, indent=2)
-
-    # print(f"Saved evaluation results to {eval_results_path}")
 
     return all_stats
 
@@ -253,116 +239,20 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
         return
 
    
-    output_dir = os.path.join(args.output_dir, args.model_name, "rf20_IPT_singleclass_rankScore", "final_instruction_eval")
+    # output_dir = os.path.join(args.output_dir, args.model_name, "rf20_IPT_singleclass_rankScore", "final_instruction_eval")
+    output_dir = os.path.join(args.output_dir, "final_instruction_eval")
     run_name = f"rank"
 
     # # Set seed for reproducibility
     utils.set_seed(args.seed)
 
-    # os.makedirs(args.output_dir, exist_ok=True)
-
-    # print(f"Using model: {args.model_name}")
-    # if model is None or processor is None:
-    #     model, processor = utils.load_qwen_model(args.model_name)
-    # else:
-    #     print("Using provided model and processor.")
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
 
-    eval_generator = rescore_dataset(args, dataset_path, run_name=run_name, output_dir=output_dir)
+    ds_stats = rescore_dataset(args, dataset_path, run_name=run_name, output_dir=output_dir)
 
 
-    # Collect live results yielded by the generator and save them to disk periodically
-    live_results = []
-    ds_stats = None
-
-    def _save_live_results_snapshot(live_results, suffix=""):
-        """
-        Append the provided `live_results` batch to a master JSONL and optionally
-        write a per-part JSONL (when suffix is provided). If suffix is empty,
-        this is treated as the final save: append remaining items and write a
-        pretty JSON by reading the master JSONL.
-        """
-        try:
-            dataset_basename = os.path.basename(dataset_path.rstrip('/'))
-            save_dir = os.path.join(args.output_dir, "live_results", run_name)
-            os.makedirs(save_dir, exist_ok=True)
-
-            master_jsonl = os.path.join(save_dir, f"{dataset_basename}_live_results.jsonl")
-            part_jsonl = os.path.join(save_dir, f"{dataset_basename}_live_results{suffix}.jsonl") if suffix else None
-            pretty_json = os.path.join(save_dir, f"{dataset_basename}_live_results{suffix}.json") if suffix else os.path.join(save_dir, f"{dataset_basename}_live_results.json")
-
-            # Append batch to master jsonl (create if missing)
-            with open(master_jsonl, "a", encoding="utf-8") as fjsonl:
-                for rec in live_results:
-                    json.dump(rec, fjsonl)
-                    fjsonl.write("\n")
-
-            # Also write a part file for this batch if requested (useful for quick inspection)
-            if part_jsonl is not None:
-                with open(part_jsonl, "w", encoding="utf-8") as fpart:
-                    for rec in live_results:
-                        json.dump(rec, fpart)
-                        fpart.write("\n")
-
-            # If this is the final snapshot (no suffix), build a pretty JSON by reading master jsonl
-            if not suffix:
-                all_recs = []
-                try:
-                    with open(master_jsonl, "r", encoding="utf-8") as fmaster:
-                        for line in fmaster:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                all_recs.append(json.loads(line))
-                            except Exception:
-                                # skip malformed lines
-                                continue
-                except FileNotFoundError:
-                    all_recs = []
-
-                with open(pretty_json, "w", encoding="utf-8") as fjson:
-                    json.dump(all_recs, fjson, indent=2)
-
-                print(f"Saved final {len(all_recs)} live results to {save_dir}")
-            else:
-                print(f"Appended {len(live_results)} live results to {master_jsonl} and saved part {part_jsonl}")
-
-        except Exception as e:
-            print(f"Failed to save live results: {e}")
-
-    try:
-        counter = 0
-        while True:
-            try:
-                item = next(eval_generator)
-                # Append the yielded result to the current buffer
-                live_results.append(item)
-                counter += 1
-
-                # Periodically save every 20 iterations: append the buffered records to
-                # the master JSONL, write a per-part file for quick inspection, then
-                # clear the in-memory buffer to free memory.
-                if counter % 20 == 0:
-                    _save_live_results_snapshot(live_results, suffix=f"_part{counter}")
-                    # Clear the in-memory buffer after persisting
-                    live_results.clear()
-
-            except StopIteration as e:
-                # Generator finished; capture return value (final stats)
-                ds_stats = e.value
-                break
-    except Exception as e:
-        print(f"Error while consuming eval_generator: {e}")
-
-    # Final save: append any remaining buffered records and produce a pretty JSON
-    if live_results:
-        _save_live_results_snapshot(live_results, suffix="")
-    else:
-        # Even if buffer is empty, ensure final pretty JSON exists by calling with empty list
-        _save_live_results_snapshot([], suffix="")
 
     if ds_stats is not None:
         # Print summary of results
