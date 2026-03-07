@@ -53,7 +53,7 @@ def set_seed_from_state(seed_state):
 def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_dir="results", 
                      eval_class_name=None, eval_cat_id=None, 
                      max_samples=None, 
-                     dataset_instructions_json=None, coco_override=None, sigclip_pipe=None, dataset_type="train"):
+                     dataset_instructions_json=None, coco_override=None, siglip_pipe=None, dataset_type="train"):
     # train_dir = os.path.join(dataset_path, "train")
     train_dir = os.path.join(dataset_path, dataset_type)
     ann_path = os.path.join(train_dir, "_annotations.coco.json")
@@ -147,7 +147,7 @@ def evaluate_dataset(args, model, processor, dataset_path, run_name="", output_d
                     class_name_list=[eval_class_name],
                     output_dir=output_dir,
                     # eval_class_name=eval_class_name,
-                    sigclip_pipe=sigclip_pipe,
+                    siglip_pipe=siglip_pipe,
                 )
 
                 for eval_type, detections in all_detections.items():
@@ -510,17 +510,20 @@ def method_generate_initial_class_definition(args, model, processor, cat_id, cla
 
         img_info_list = coco_gt.loadImgs(chosen_img_id)
         if not img_info_list:
+            print(f"Warning! No image info found for image ID {chosen_img_id}. Skipping.")
             continue
 
         img_info = img_info_list[0]
         image_path = os.path.join(train_dir, img_info["file_name"])
         if not os.path.isfile(image_path):
+            print(f"Warning! Image file not found: {image_path}. Skipping.")
             continue
 
         # Visualize GT boxes for THIS category only
         gt_bboxes = [ann['bbox'] for ann in anns if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
 
         if len(gt_bboxes) == 0:
+            print(f"Warning! No GT boxes found for category '{class_name}' in image ID {chosen_img_id}. Skipping.")
             continue
 
 
@@ -557,7 +560,7 @@ def method_generate_initial_class_definition(args, model, processor, cat_id, cla
             # dataset_instructions = dataset_instructions_json[class_name_cap]
 
             # Find the matching key ignoring case
-            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower()), None)
+            matched_key = next((key for key in dataset_instructions_json.keys() if key.lower() == class_name.lower() or key.replace(" ", "_").lower() == class_name.lower()), None)
             if matched_key:
                 dataset_instructions = dataset_instructions_json[matched_key]
             else:
@@ -696,7 +699,7 @@ def method_generate_initial_class_definition(args, model, processor, cat_id, cla
     
 
 def method_evaluate_current_instructions(args, model, iter, processor, class_name, cat_id, current_instructions, 
-                                  dataset_name, dataset_path, dataset_result_dir, coco_gt, sigclip_pipe,
+                                  dataset_name, dataset_path, dataset_result_dir, coco_gt, siglip_pipe,
                                   i, instruction_refinements,
                                   best_instructions, best_mAP,
                                   prev_instructions, prev_mAP,
@@ -732,7 +735,7 @@ def method_evaluate_current_instructions(args, model, iter, processor, class_nam
         # max_samples=None  # Evaluate on the full dataset to get proper metrics
         # max_samples=5 #10 #2 #8 #5  #TODO-GRG: Need to remove - For testing purposes only
         coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
-        sigclip_pipe=sigclip_pipe
+        siglip_pipe=siglip_pipe
     )
 
     #Restore seed state
@@ -1082,7 +1085,7 @@ def method_refine_prompt(args, model, processor, class_name, current_instruction
     return current_instructions
 
 
-def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, sigclip_pipe, stats_type):
+def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type):
 
     # Original dataset instructions path - default from dataset README 
     org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
@@ -1128,7 +1131,7 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
             dataset_instructions_json=current_instructions_json, 
             eval_class_name=class_name,
             eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
-            sigclip_pipe=sigclip_pipe,
+            siglip_pipe=siglip_pipe,
             dataset_type="valid"
         )
 
@@ -1173,7 +1176,7 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
 
      
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
-                                    num_samples=None, sigclip_pipe=None):
+                                    num_samples=None, siglip_pipe=None):
     
     """
     Performs iterative prompt refinement.
@@ -1350,7 +1353,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                 # --- Step 2: Evaluate with the current prompt ---
                 all_results_for_iter, best_instructions, best_mAP, current_mAP, current_instructions, prev_instructions, prev_mAP, instruction_refinements = method_evaluate_current_instructions(args, 
                             model, iter, processor, class_name, cat_id, current_instructions, 
-                            dataset_name, dataset_path, f"{dataset_result_dir}/{class_name}_iter{iter}", coco_gt, sigclip_pipe,
+                            dataset_name, dataset_path, f"{dataset_result_dir}/{class_name}_iter{iter}", coco_gt, siglip_pipe,
                             iter, instruction_refinements,
                             best_instructions, best_mAP,
                             prev_instructions, prev_mAP,
@@ -1445,7 +1448,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         # --- Step 5: Evaluate instructions on ValSet to select best one ---
         
         #Evaluate all instructions on Val set to select the best one
-        valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, sigclip_pipe, stats_type)
+        valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type)
         print(f"\nEvaluation of all instructions on validation set for class '{class_name}':\n{valSet_instruction_eval_result}")
         print(f"Best instructions on validation set for class '{class_name}' (mAP: {valSet_best_mAP:.4f}): \n{valSet_best_instructions}")
 
@@ -1489,12 +1492,16 @@ def run_single_dataset_evaluation(args):
     """
 
     
-    root_dir = "./datasets/rf100-vl-fsod/"
+    # root_dir = "./datasets/rf100-vl-fsod/"
+    # root_dir = "./datasets/LVIS/"
+    root_dir = args.root_path
+    print(f"Root directory: {root_dir}")
     if not os.path.isdir(root_dir):
         print(f"Root directory not found: {root_dir}")
         return
     
     dataset_path = os.path.join(root_dir, args.dataset_path)
+    print(f"Dataset path: {dataset_path}")
 
     if not dataset_path or not os.path.isdir(dataset_path):
         print(f"Error: Invalid or missing --dataset_path: {dataset_path}")
@@ -1511,8 +1518,8 @@ def run_single_dataset_evaluation(args):
     model, processor = utils.load_qwen_model(args.model_name)
 
     if args.siglip_rescore:
-        sigclip_pipe = utils.load_sigclip_pipeline()
-        print("Loaded SigClip pipeline for confidence scoring.")
+        siglip_pipe = utils.load_siglip_pipeline()
+        print("Loaded SigLip pipeline for confidence scoring.")
 
     print("=" * 60)
     print(f"Evaluating dataset: {dataset_path}")
@@ -1529,7 +1536,7 @@ def run_single_dataset_evaluation(args):
             processor=processor,
             dataset_path=dataset_path,
             num_iterations=args.num_ipt_iterations,
-            sigclip_pipe=sigclip_pipe if args.siglip_rescore else None
+            siglip_pipe=siglip_pipe if args.siglip_rescore else None
         )
 
 
@@ -1555,6 +1562,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name e.g., Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct]')
     # parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
     # parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
+    parser.add_argument("--root_path", type=str, default="./datasets/rf100-vl-fsod/", help="Path to a root dataset dir. Should contain subdirs for each dataset with COCO format annotations.")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
     parser.add_argument("--output_dir", type=str, default="results/rf100vl_IPT/rf20_IPT_singleclass_vqaScore_withNMS", help="Directory to save results and visuals.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")

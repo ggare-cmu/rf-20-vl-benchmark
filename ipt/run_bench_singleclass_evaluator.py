@@ -245,12 +245,16 @@ def run_single_dataset_evaluation(args, model=None, processor=None):
     Runs evaluation for a single dataset. This function is called by the dispatcher.
     """
 
-    root_dir = "./datasets/rf100-vl-fsod/"
+    # root_dir = "./datasets/rf100-vl-fsod/"
+    # root_dir = "./datasets/LVIS/"
+    root_dir = args.root_path
+    print(f"Root directory: {root_dir}")
     if not os.path.isdir(root_dir):
         print(f"Root directory not found: {root_dir}")
         return
     
     dataset_path = os.path.join(root_dir, args.dataset_path)
+    print(f"Dataset path: {dataset_path}")
 
     if not dataset_path or not os.path.isdir(dataset_path):
         print(f"Error: Invalid or missing --dataset_path: {dataset_path}")
@@ -417,6 +421,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_name', type=str, default="Qwen3-VL-235B-A22B-Instruct", help='model name e.g., Qwen2.5-VL-7B-Instruct, Qwen2.5-VL-72B-Instruct, Qwen3-VL-8B-Instruct, Qwen3-VL-30B-A3B-Instruct, Qwen3-VL-235B-A22B-Instruct]')
     # parser.add_argument("--no_instructions", action="store_true", help="Run inference with no instructions")
     # parser.add_argument("--few_shot", action="store_true", help="Use 3 random few-shot examples from test set")
+    parser.add_argument("--root_path", type=str, default="./datasets/rf100-vl-fsod/", help="Path to a root dataset dir. Should contain subdirs for each dataset with COCO format annotations.")
     parser.add_argument("--dataset_path", type=str, default=None, help="Path to a single dataset to evaluate. If not set, all datasets will be evaluated in parallel.")
     parser.add_argument("--output_dir", type=str, default="results/rf100vl-zeroshot/rf20_IPT_singleclass_vqaScore_withNMS", help="Directory to save results and visuals.")
     parser.add_argument("--data_instr_path", type=str, default="./data_instr/default/README.dataset", help="Directory to save results and visuals.")
