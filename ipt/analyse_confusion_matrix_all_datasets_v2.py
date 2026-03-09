@@ -254,8 +254,8 @@ def plot_confusion_matrix(
         col_sums[col_sums == 0] = 1
         cm_plot  = cm.astype(float) / col_sums
         fmt      = ".2f"
-        cb_label = "Fraction of matched GT"
-        norm_label = "matched GT-normalized"
+        cb_label = "Fraction of GT column"
+        norm_label = "column-normalized"
     else:
         cm_plot  = cm.astype(float)
         fmt      = ".0f"
@@ -350,7 +350,7 @@ def plot_aggregate_confusion_matrix(
             cm_norm, mask=mask, annot=True, fmt=".2f", cmap="Blues",
             xticklabels=labels, yticklabels=labels,
             linewidths=0.4, linecolor="#cccccc",
-            cbar_kws={"label": "Fraction of matched GT", "shrink": 0.7},
+            cbar_kws={"label": "Fraction of GT column", "shrink": 0.7},
             ax=ax, annot_kws={"size": _pick_font_size(n), "family": "Times New Roman"},
             vmin=0, vmax=1,
         )
@@ -362,7 +362,7 @@ def plot_aggregate_confusion_matrix(
         ax.set_ylabel("Predicted Class",    fontsize=11, labelpad=8)
         ax.set_title(
             f"{model_name} \u2014 {title_extra}\n"
-            f"Confusion matrix  (IoU \u2265 {iou_threshold}, matched GT-normalized, matched GT only)",
+            f"Confusion matrix  (IoU \u2265 {iou_threshold}, column-normalized, matched GT only)",
             fontsize=10, pad=12,
         )
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)

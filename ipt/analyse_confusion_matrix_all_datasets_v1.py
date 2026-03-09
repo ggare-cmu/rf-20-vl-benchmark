@@ -4,17 +4,18 @@ and computes + plots a per-class confusion matrix for each dataset.
 
 Confusion matrix definition used here
 --------------------------------------
-We only evaluate GT boxes that have at least one matching prediction (IoU >=
-iou_threshold).  Unmatched GT boxes (no prediction overlaps them) are excluded
-entirely — they do not appear as FN or in any background row.
+For each image we first filter predicted boxes by IoU ≥ iou_threshold (default
+0.5) against any ground-truth box.  Only predictions that survive this spatial
+filter are considered "localised" and contribute to TP/FP counts.
 
-For each matched GT box, the highest-scoring localised prediction determines
-the cell:
+  TP  predicted class C, matched GT box has class C      (correct class + localised)
+  FP  predicted class C, matched GT box has class C'≠C   (wrong class  + localised)
+       — these are the off-diagonal cells                —
+  FN  GT box with class C has no localised prediction    (missed detection)
 
-  TP  predicted class C  ==  GT class C   (diagonal)
-  FP  predicted class C  !=  GT class C   (off-diagonal — class confusion)
-
-The "background" pseudo-class is NOT included in the confusion matrix.
+Unmatched predictions (IoU < threshold with every GT box) are treated as
+background false-positives and are tallied in a separate "background" row/column
+so the matrix remains square.
 
 Usage
 -----
@@ -35,15 +36,9 @@ from collections import defaultdict, OrderedDict
 from pathlib import Path
 from itertools import product
 
-import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
-
-# Times New Roman throughout
-matplotlib.rcParams["font.family"]     = "serif"
-matplotlib.rcParams["font.serif"]      = ["Times New Roman", "Times", "DejaVu Serif"]
-matplotlib.rcParams["mathtext.fontset"] = "stix"   # matches Times in math mode
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -132,87 +127,107 @@ def compute_confusion_matrix(
     iou_threshold: float = 0.5,
 ) -> tuple[np.ndarray, list]:
     """
-    Build a confusion matrix considering ONLY GT boxes that have at least one
-    matching prediction (IoU >= iou_threshold).  GT boxes with no matching
-    prediction are excluded entirely.
+    Build a confusion matrix from COCO ground-truth and a predictions list.
 
     Algorithm
     ---------
     For every image:
-      1. For each GT box, find the highest-scoring prediction whose IoU with
-         that GT box is >= iou_threshold.  GT boxes with no such prediction
-         are skipped (excluded from evaluation).
-      2. For each matched (GT, pred) pair:
-             pred_class == gt_class  →  TP  (diagonal)
-             pred_class != gt_class  →  FP  (off-diagonal — class confusion)
-
-    The "background" pseudo-class is NOT used: the matrix is n_classes × n_classes.
+      1. Collect GT annotations and predicted boxes.
+      2. For each predicted box (sorted by score desc), find the highest-IoU
+         GT box that has not been claimed yet.
+         • If best IoU ≥ iou_threshold  → the prediction is "localised":
+               pred_class == gt_class   → TP  (diagonal)
+               pred_class != gt_class   → FP  (off-diagonal, confusion)
+           The matched GT box is marked as claimed.
+         • If best IoU < iou_threshold  → the prediction is unmatched
+               → tallied as background FP  (column "background", row pred_class)
+      3. Unclaimed GT boxes → FN for their class
+               → tallied as background FN  (row "background", column gt_class)
 
     Parameters
     ----------
     coco_gt       : COCO ground-truth object
     predictions   : list of dicts with keys image_id, category_id, bbox, score
-    iou_threshold : minimum IoU for a prediction to be considered a match
+    iou_threshold : minimum IoU for a prediction to be considered localised
 
     Returns
     -------
-    cm      : np.ndarray  shape (n_classes, n_classes)
-              cm[pred_idx, gt_idx]  = number of GT boxes of class gt_idx
-                                      whose best-matching prediction has class pred_idx
-    labels  : list of class name strings (length n_classes, NO 'background')
+    cm      : np.ndarray  shape (n_classes+1, n_classes+1)
+              rows = predicted class (last row = background/unmatched GT)
+              cols = GT class        (last col = background/unmatched pred)
+              cm[i, j]  = number of times class i was predicted for a box
+                          whose best-matching GT had class j
+              cm[-1, j] = GT class j boxes with no localised prediction (FN)
+              cm[i, -1] = predictions of class i with no GT match       (FP-bkg)
+    labels  : list of class names, last entry is "background"
     """
     cat_ids   = sorted(coco_gt.getCatIds())
     cat_names = [coco_gt.cats[cid]["name"] for cid in cat_ids]
     catid2idx = {cid: i for i, cid in enumerate(cat_ids)}
     n_cls     = len(cat_ids)
+    BKG       = n_cls   # index for the "background / unmatched" pseudo-class
 
-    cm = np.zeros((n_cls, n_cls), dtype=np.int64)
+    # n_cls+1 × n_cls+1:  cm[pred_idx, gt_idx]
+    cm = np.zeros((n_cls + 1, n_cls + 1), dtype=np.int64)
 
+    # Group predictions and GT by image
     img_ids = coco_gt.getImgIds()
 
-    # Index predictions by image_id, sorted by score descending per image
+    # Index predictions by image_id
     pred_by_img: dict[int, list] = defaultdict(list)
     for p in predictions:
         if p.get("category_id", -1) != -1:
             pred_by_img[p["image_id"]].append(p)
-    for img_id in pred_by_img:
-        pred_by_img[img_id].sort(key=lambda p: p.get("score", 0.0), reverse=True)
 
     for img_id in img_ids:
         ann_ids = coco_gt.getAnnIds(imgIds=img_id)
-        gt_anns = coco_gt.loadAnns(ann_ids)
-        preds   = pred_by_img.get(img_id, [])
+        gt_anns = coco_gt.loadAnns(ann_ids)   # list of {category_id, bbox, ...}
 
-        # For each GT box: find its best-scoring prediction with IoU >= threshold.
-        # A prediction can be reused across GT boxes (we are evaluating from the
-        # GT's perspective: "which prediction best covers this GT box?").
-        for gt in gt_anns:
-            gt_cat_idx = catid2idx.get(gt["category_id"], -1)
-            if gt_cat_idx == -1:
+        preds = sorted(
+            pred_by_img.get(img_id, []),
+            key=lambda p: p.get("score", 0.0),
+            reverse=True,
+        )
+
+        gt_claimed = [False] * len(gt_anns)
+
+        for pred in preds:
+            pred_idx = catid2idx.get(pred["category_id"], -1)
+            if pred_idx == -1:
                 continue
 
-            best_score = -1.0
-            best_pred  = None
+            pred_bbox = pred["bbox"]
 
-            for pred in preds:
-                iou = compute_iou(pred["bbox"], gt["bbox"])
-                if iou >= iou_threshold:
-                    score = pred.get("score", 0.0)
-                    if score > best_score:
-                        best_score = score
-                        best_pred  = pred
+            # Find best-IoU unclaimed GT box
+            best_iou  = 0.0
+            best_gt_i = -1
+            for gi, gt in enumerate(gt_anns):
+                if gt_claimed[gi]:
+                    continue
+                iou = compute_iou(pred_bbox, gt["bbox"])
+                if iou > best_iou:
+                    best_iou  = iou
+                    best_gt_i = gi
 
-            # Only include GT boxes that have at least one matching prediction
-            if best_pred is None:
-                continue
+            if best_iou >= iou_threshold and best_gt_i != -1:
+                # Prediction is localised — claim the GT box
+                gt_claimed[best_gt_i] = True
+                gt_cat_idx = catid2idx.get(gt_anns[best_gt_i]["category_id"], -1)
+                if gt_cat_idx != -1:
+                    cm[pred_idx, gt_cat_idx] += 1
+            else:
+                # Unmatched prediction → background FP column
+                cm[pred_idx, BKG] += 1
 
-            pred_cat_idx = catid2idx.get(best_pred["category_id"], -1)
-            if pred_cat_idx == -1:
-                continue
+        # Unclaimed GT boxes → background FN row
+        for gi, gt in enumerate(gt_anns):
+            if not gt_claimed[gi]:
+                gt_cat_idx = catid2idx.get(gt["category_id"], -1)
+                if gt_cat_idx != -1:
+                    cm[BKG, gt_cat_idx] += 1
 
-            cm[pred_cat_idx, gt_cat_idx] += 1
-
-    return cm, cat_names
+    labels = cat_names + ["background"]
+    return cm, labels
 
 
 # ---------------------------------------------------------------------------
@@ -240,28 +255,29 @@ def plot_confusion_matrix(
 
     Parameters
     ----------
-    cm           : raw count matrix (n_classes, n_classes) — no background row/col
-    labels       : class names (length n_classes)
+    cm           : raw count matrix (n+1, n+1)
+    labels       : class names including 'background' as last entry
     dataset_name : used in the title
     out_path     : full path for the saved PNG
-    normalize    : if True, normalize each GT column (col-wise recall view)
+    normalize    : if True, normalise each GT column (col-wise recall view)
     iou_threshold: shown in the title for reference
     """
     n = len(labels)
 
+    # Column-wise normalisation: each column sums to 1 (GT-class recall view).
+    # Rows show what fraction of GT-class j was predicted as each class i.
     if normalize:
         col_sums = cm.sum(axis=0, keepdims=True).astype(float)
-        col_sums[col_sums == 0] = 1
-        cm_plot  = cm.astype(float) / col_sums
-        fmt      = ".2f"
-        cb_label = "Fraction of matched GT"
-        norm_label = "matched GT-normalized"
+        col_sums[col_sums == 0] = 1          # avoid /0
+        cm_plot = cm.astype(float) / col_sums
+        fmt     = ".2f"
+        cb_label = "Fraction of GT column"
     else:
-        cm_plot  = cm.astype(float)
-        fmt      = ".0f"
+        cm_plot = cm.astype(float)
+        fmt     = ".0f"
         cb_label = "Count"
-        norm_label = "raw counts"
 
+    # Mask exact zeros so the heatmap stays readable
     mask = (cm == 0)
 
     fig_size = max(6, n * 0.7)
@@ -279,7 +295,7 @@ def plot_confusion_matrix(
         linecolor="#cccccc",
         cbar_kws={"label": cb_label, "shrink": 0.7},
         ax=ax,
-        annot_kws={"size": _pick_font_size(n), "family": "Times New Roman"},
+        annot_kws={"size": _pick_font_size(n)},
         vmin=0,
         vmax=1 if normalize else None,
     )
@@ -287,17 +303,17 @@ def plot_confusion_matrix(
     ax.set_xlabel("Ground-Truth Class", fontsize=11, labelpad=8)
     ax.set_ylabel("Predicted Class",    fontsize=11, labelpad=8)
     ax.set_title(
-        f"{dataset_name}\n"
-        f"Confusion matrix  (IoU \u2265 {iou_threshold},  {norm_label},  "
-        f"matched GT only)",
+        f"{dataset_name}\nConfusion matrix  (IoU ≥ {iou_threshold},"
+        f"  {'column-normalised' if normalize else 'raw counts'})",
         fontsize=11, pad=12,
     )
 
-    # Red outline on every diagonal cell (TP)
-    for i in range(n):
+    # Highlight the diagonal (TP) with a subtle box
+    for i in range(n - 1):   # skip background diagonal
         ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False,
                                    edgecolor="#e74c3c", lw=1.2))
 
+    # Rotate tick labels for readability
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
     ax.set_yticklabels(ax.get_yticklabels(), rotation=0,  fontsize=8)
 
@@ -309,7 +325,7 @@ def plot_confusion_matrix(
 
 
 # ---------------------------------------------------------------------------
-# Aggregate confusion matrix (sum across datasets, then re-normalize)
+# Aggregate confusion matrix (sum across datasets, then re-normalise)
 # ---------------------------------------------------------------------------
 
 def plot_aggregate_confusion_matrix(
@@ -320,11 +336,16 @@ def plot_aggregate_confusion_matrix(
 ):
     """
     Sum all per-dataset confusion matrices that share the same label set,
-    then plot the aggregate normalized matrix.
+    then plot the aggregate normalised matrix.
+
+    Datasets with different label sets (different number of classes) are
+    plotted separately in the per-dataset step and excluded from the aggregate.
     """
+    # Group datasets by their label tuple so we only sum compatible matrices
     groups: dict[tuple, list] = defaultdict(list)
     for ds_name, (cm, labels) in cms_by_dataset.items():
-        groups[tuple(labels)].append((ds_name, cm, labels))
+        key = tuple(labels)
+        groups[key].append((ds_name, cm, labels))
 
     for label_tuple, members in groups.items():
         labels  = list(label_tuple)
@@ -336,6 +357,7 @@ def plot_aggregate_confusion_matrix(
             f"({ds_list[:80]}{'...' if len(ds_list) > 80 else ''})"
         )
 
+        # Save alongside individual plots
         stem     = out_path.replace(".png", f"_n{len(members)}.png")
         n        = len(labels)
         fig_size = max(6, n * 0.7)
@@ -350,19 +372,19 @@ def plot_aggregate_confusion_matrix(
             cm_norm, mask=mask, annot=True, fmt=".2f", cmap="Blues",
             xticklabels=labels, yticklabels=labels,
             linewidths=0.4, linecolor="#cccccc",
-            cbar_kws={"label": "Fraction of matched GT", "shrink": 0.7},
-            ax=ax, annot_kws={"size": _pick_font_size(n), "family": "Times New Roman"},
+            cbar_kws={"label": "Fraction of GT column", "shrink": 0.7},
+            ax=ax, annot_kws={"size": _pick_font_size(n)},
             vmin=0, vmax=1,
         )
-        for i in range(n):
+        for i in range(n - 1):
             ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False,
                                        edgecolor="#e74c3c", lw=1.2))
 
         ax.set_xlabel("Ground-Truth Class", fontsize=11, labelpad=8)
         ax.set_ylabel("Predicted Class",    fontsize=11, labelpad=8)
         ax.set_title(
-            f"{model_name} \u2014 {title_extra}\n"
-            f"Confusion matrix  (IoU \u2265 {iou_threshold}, matched GT-normalized, matched GT only)",
+            f"{model_name} — {title_extra}\n"
+            f"Confusion matrix  (IoU ≥ {iou_threshold}, column-normalised)",
             fontsize=10, pad=12,
         )
         ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=8)
@@ -375,7 +397,7 @@ def plot_aggregate_confusion_matrix(
 
 
 # ---------------------------------------------------------------------------
-# Per-dataset TP / FP summary bar chart
+# Per-dataset TP / FP / FN summary bar chart
 # ---------------------------------------------------------------------------
 
 def plot_cm_summary_bars(
@@ -384,33 +406,42 @@ def plot_cm_summary_bars(
     model_name: str,
 ):
     """
-    For each dataset compute TP (correct class, matched GT) and
-    FP (wrong class, matched GT), then plot a stacked bar + Precision scatter.
-
-    Note: FN (unmatched GT) and background FP are excluded by design — this
-    confusion matrix only covers matched GT boxes.
+    For each dataset compute overall TP, FP (localised wrong class),
+    FP-background (unmatched pred), and FN (missed GT), then plot a
+    stacked bar chart so you can compare datasets at a glance.
     """
     rows = []
     for ds_name, (cm, labels) in cms_by_dataset.items():
-        n      = len(labels)
-        tp     = int(np.trace(cm))
-        fp_cls = int(cm.sum() - tp)   # off-diagonal: matched but wrong class
+        n   = len(labels) - 1    # exclude background pseudo-class
+        BKG = n
+
+        tp       = int(np.trace(cm[:n, :n]))               # diagonal, no bkg
+        fp_cls   = int(cm[:n, :n].sum() - tp)              # off-diagonal, localised
+        fp_bkg   = int(cm[:n, BKG].sum())                  # pred with no GT match
+        fn       = int(cm[BKG, :n].sum())                  # missed GT boxes
+        total_gt = tp + fp_cls + fn                        # all localised + FN
 
         rows.append({
-            "Dataset":      ds_name,
+            "Dataset": ds_name,
             "TP":           tp,
             "FP (cls err)": fp_cls,
-            "Precision":    tp / max(tp + fp_cls, 1),
+            "FP (no match)": fp_bkg,
+            "FN":           fn,
+            "Precision": tp / max(tp + fp_cls + fp_bkg, 1),
+            "Recall":    tp / max(tp + fn, 1),
         })
 
     df = pd.DataFrame(rows).set_index("Dataset")
 
+    # --- Stacked bar of TP / FP-cls / FP-bkg / FN ---
     fig, axes = plt.subplots(1, 2, figsize=(18, max(5, len(rows) * 0.45 + 2)), dpi=120)
-    fig.suptitle(f"{model_name} \u2014 detection breakdown per dataset (matched GT only)",
-                 fontsize=13, fontweight="bold", y=1.01)
+    fig.suptitle(f"{model_name} — detection breakdown per dataset", fontsize=13,
+                 fontweight="bold", y=1.01)
 
-    colors     = {"TP": "#2ecc71", "FP (cls err)": "#e67e22"}
-    count_cols = ["TP", "FP (cls err)"]
+    colors = {"TP": "#2ecc71", "FP (cls err)": "#e67e22",
+              "FP (no match)": "#e74c3c", "FN": "#95a5a6"}
+
+    count_cols = ["TP", "FP (cls err)", "FP (no match)", "FN"]
     df[count_cols].plot(
         kind="barh", stacked=True, ax=axes[0],
         color=[colors[c] for c in count_cols],
@@ -418,21 +449,22 @@ def plot_cm_summary_bars(
     )
     axes[0].set_xlabel("Box count", fontsize=10)
     axes[0].set_ylabel("")
-    axes[0].set_title("Absolute counts (matched GT boxes only)", fontsize=11)
+    axes[0].set_title("Absolute counts", fontsize=11)
     axes[0].legend(loc="lower right", fontsize=8)
     sns.despine(ax=axes[0], left=True, bottom=True)
 
+    # --- Precision / Recall scatter ---
     ax2 = axes[1]
     scatter_colors = plt.cm.tab20(np.linspace(0, 1, len(rows)))
     for i, (idx, row) in enumerate(df.iterrows()):
-        ax2.scatter(i, row["Precision"], color=scatter_colors[i],
+        ax2.scatter(row["Recall"], row["Precision"], color=scatter_colors[i],
                     s=80, zorder=3, label=idx)
-    ax2.set_xticks([])
+    ax2.set_xlim(-0.05, 1.05)
     ax2.set_ylim(-0.05, 1.05)
-    ax2.set_ylabel("Classification Precision  (TP / (TP + FP-cls))", fontsize=10)
-    ax2.set_title("Per-dataset classification precision\n(among localized predictions)", fontsize=11)
-    ax2.axhline(df["Precision"].mean(), color="#e74c3c", ls="--", lw=1.0,
-                label=f"mean = {df['Precision'].mean():.2f}")
+    ax2.set_xlabel("Recall  (TP / (TP + FN))", fontsize=10)
+    ax2.set_ylabel("Precision  (TP / (TP + FP))", fontsize=10)
+    ax2.set_title("Precision vs Recall per dataset", fontsize=11)
+    ax2.axline((0, 0), slope=1, color="#bdc3c7", ls="--", lw=0.8)
     ax2.legend(fontsize=6, bbox_to_anchor=(1.01, 1), loc="upper left",
                borderaxespad=0, ncol=1)
     ax2.grid(True, alpha=0.3)
@@ -443,6 +475,7 @@ def plot_cm_summary_bars(
     plt.close()
     print(f"[CM] Summary bar chart saved -> {out_path}")
 
+    # Also save the numbers as CSV
     csv_path = out_path.replace(".png", ".csv")
     df.reset_index().to_csv(csv_path, index=False)
     print(f"[CM] Summary CSV saved -> {csv_path}")
@@ -467,7 +500,12 @@ def evaluate_dataset(
       • locate annotations and predictions
       • run COCO eval
       • run TIDE eval
-      • compute confusion matrix (matched GT only, no background class)
+      • compute confusion matrix
+
+    Returns
+    -------
+    coco_stats : dict  { score_type: [12 floats] }   or None on failure
+    cm_result  : tuple (cm_array, labels)             or None on failure
     """
     # --- Locate ground truth annotations ---
     dataset_path = os.path.join(dataset_root, dataset_name)
@@ -540,7 +578,7 @@ def evaluate_dataset(
     except Exception as e:
         print(f"  [ERROR] TIDE analysis failed: {e}")
 
-    # ---- Confusion matrix (matched GT only, no background) ----
+    # ---- Confusion matrix ----
     cm_result = None
     try:
         cm, labels = compute_confusion_matrix(
@@ -548,18 +586,17 @@ def evaluate_dataset(
         )
         cm_result = (cm, labels)
 
-        # Terminal summary
-        n = len(labels)
-        print(f"  [CM] IoU\u2265{iou_threshold} | matched GT only | classes: {labels}")
-        print(f"       {'Class':<24} {'TP':>6} {'FP-cls':>8}  (unmatched GT excluded)")
-        for i, cls in enumerate(labels):
+        # Print per-class TP / FP / FN to terminal
+        n   = len(labels) - 1
+        BKG = n
+        print(f"  [CM] IoU≥{iou_threshold} | classes: {labels[:-1]}")
+        print(f"       {'Class':<24} {'TP':>6} {'FP-cls':>8} {'FP-bkg':>8} {'FN':>6}")
+        for i, cls in enumerate(labels[:-1]):
             tp     = int(cm[i, i])
-            fp_cls = int(cm[i, :].sum()) - tp
-            print(f"       {cls:<24} {tp:>6} {fp_cls:>8}")
-        total_matched = int(cm.sum())
-        total_tp      = int(np.trace(cm))
-        print(f"       {'TOTAL':<24} {total_tp:>6} {total_matched - total_tp:>8}"
-              f"  |  matched GT boxes = {total_matched}")
+            fp_cls = int(cm[i, :n].sum()) - tp
+            fp_bkg = int(cm[i, BKG])
+            fn     = int(cm[BKG, i])
+            print(f"       {cls:<24} {tp:>6} {fp_cls:>8} {fp_bkg:>8} {fn:>6}")
 
     except Exception as e:
         print(f"  [ERROR] Confusion matrix computation failed: {e}")
@@ -667,7 +704,7 @@ def _plot_per_dataset_spread(
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6), dpi=150,
                              gridspec_kw={"width_ratios": [3, 1]})
-    fig.suptitle(f"{model_name} \u2014 TIDE error breakdown across {n_datasets} datasets",
+    fig.suptitle(f"{model_name} — TIDE error breakdown across {n_datasets} datasets",
                  fontsize=13, fontweight="bold", y=1.02)
 
     ax_main = axes[0]
@@ -686,9 +723,9 @@ def _plot_per_dataset_spread(
                 ax_main.text(mean_vals[err_type] + 0.15, i,
                              f"{mean_vals[err_type]:.2f}",
                              va="center", fontsize=9, color="#333333")
-    ax_main.set_xlabel("\u0394 mAP", fontsize=11)
+    ax_main.set_xlabel("Δ mAP", fontsize=11)
     ax_main.set_ylabel("")
-    ax_main.set_title("Main error types (mean \u00b1 std)", fontsize=11)
+    ax_main.set_title("Main error types (mean ± std)", fontsize=11)
     sns.despine(ax=ax_main, left=True, bottom=True)
 
     ax_spec = axes[1]
@@ -708,8 +745,8 @@ def _plot_per_dataset_spread(
                              f"{mean_vals_s[err_type]:.2f}",
                              ha="center", fontsize=9, color="#333333")
     ax_spec.set_xlabel("")
-    ax_spec.set_ylabel("\u0394 mAP", fontsize=11)
-    ax_spec.set_title("FP / FN (mean \u00b1 std)", fontsize=11)
+    ax_spec.set_ylabel("Δ mAP", fontsize=11)
+    ax_spec.set_title("FP / FN (mean ± std)", fontsize=11)
     sns.despine(ax=ax_spec, left=True, bottom=True)
 
     plt.tight_layout()
@@ -796,10 +833,10 @@ def main():
     )
     parser.add_argument(
         "--results_root", type=str,
-        default="results/results_data3/final_consolidated_results/rf-20-vl-benchmark/"
-                "results/eccv26/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/rf20_IPT_singleclass_rankScore",
-        # default="results/results_data3/mllm_fsod_outputs/mllm_fsod/results_qwen_3_30b_a3b_instruct/"
-        #         "results/Qwen3-VL-30B-A3B-Instruct_instructions_parallel_",
+        # default="results/results_data3/final_consolidated_results/rf-20-vl-benchmark/"
+        #         "results/eccv26/rf100vl_IPT/Qwen3-VL-30B-A3B-Instruct/rf20_IPT_singleclass_rankScore",
+        default="results/results_data3/mllm_fsod_outputs/mllm_fsod/results_qwen_3_30b_a3b_instruct/"
+                "results/Qwen3-VL-30B-A3B-Instruct_instructions_parallel_",
     )
     parser.add_argument("--dataset_root",    type=str, default="./datasets/rf100-vl-fsod")
     parser.add_argument(
@@ -808,26 +845,25 @@ def main():
                 "rf20_IPT_singleclass_vqaScore_withNMS/iterative_prompt_refinement/"
                 "all_refined_class_instructions",
     )
-    parser.add_argument("--score_type",        type=str,   
-                        # default="baseline",
+    parser.add_argument("--score_type",       type=str,  
                         # default="model",
-                        default="vqa",
-                        help="'model', 'rank', 'baseline', etc.")
-    parser.add_argument("--iou_threshold",     type=float, default=0.5,
+                        # default="vqa",
+                        default="baseline",
+                        help="'model', 'rank', etc.")
+    parser.add_argument("--iou_threshold",    type=float, default=0.5,
                         help="IoU threshold for confusion matrix localisation filter.")
-    parser.add_argument("--nms_iou_threshold", type=float, default=0.1)
-    parser.add_argument("--output_dir",        type=str,   default=None)
-    parser.add_argument("--model_name",        type=str,   default=None)
-    parser.add_argument("--no_normalize_cm",   action="store_true",
-                        help="Plot raw counts instead of column-normalized confusion matrices.")
+    parser.add_argument("--nms_iou_threshold",type=float, default=0.1)
+    parser.add_argument("--output_dir",       type=str,  default=None)
+    parser.add_argument("--model_name",       type=str,  default=None)
+    parser.add_argument("--no_normalize_cm",  action="store_true",
+                        help="Plot raw counts instead of column-normalised confusion matrices.")
     args = parser.parse_args()
 
-    output_dir = args.output_dir or os.path.join(
-        args.results_root, "analyse_confusion_matrices", args.score_type
-    )
+    # output_dir = args.output_dir or os.path.join(args.results_root, "analyse_detection_errors")
+    output_dir = args.output_dir or os.path.join(args.results_root, "analyse_confusion_matrices", args.score_type)
     os.makedirs(output_dir, exist_ok=True)
 
-    model_name   = args.model_name or Path(args.results_root).parts[-2]
+    model_name = args.model_name or Path(args.results_root).parts[-2]
     normalize_cm = not args.no_normalize_cm
 
     cm_out_dir = os.path.join(output_dir, "confusion_matrices")
@@ -837,8 +873,8 @@ def main():
     # 1. Per-dataset evaluation                                           #
     # ------------------------------------------------------------------ #
     tide = TIDE()
-    all_dataset_stats: dict[str, dict]                    = {}
-    cms_by_dataset:    dict[str, tuple[np.ndarray, list]] = {}
+    all_dataset_stats:  dict[str, dict]                    = {}
+    cms_by_dataset:     dict[str, tuple[np.ndarray, list]] = {}
 
     for dataset_name in DATASETS:
         print(f"\n{'='*60}")
@@ -865,6 +901,7 @@ def main():
             cm, labels = cm_result
             cms_by_dataset[dataset_name] = cm_result
 
+            # Plot per-dataset confusion matrix
             cm_path = os.path.join(cm_out_dir, f"{dataset_name}_confusion_matrix.png")
             plot_confusion_matrix(
                 cm=cm,
@@ -883,8 +920,33 @@ def main():
     # ------------------------------------------------------------------ #
     consolidate(all_dataset_stats, output_dir)
 
+    # # ------------------------------------------------------------------ #
+    # # 3. TIDE: terminal summary + per-dataset plots                       #
+    # # ------------------------------------------------------------------ #
+    # print(f"\n{'='*60}")
+    # print("TIDE summary across all datasets:")
+    # tide.summarize()
+
+    # tide_plots_dir = os.path.join(output_dir, "tide_plots_per_dataset")
+    # tide.plot(out_dir=tide_plots_dir)
+    # print(f"[TIDE] Per-dataset plots saved -> {tide_plots_dir}")
+
+    # # ------------------------------------------------------------------ #
+    # # 4. Consolidated TIDE error analysis + plots                         #
+    # # ------------------------------------------------------------------ #
+    # tide_errors      = tide.get_all_errors()
+    # errors_json_path = os.path.join(output_dir, f"tide_errors_{args.score_type}.json")
+    # save_tide_errors(tide_errors, errors_json_path)
+
+    # consolidated_errors = plot_consolidated_tide_errors(
+    #     errors_per_dataset=tide_errors,
+    #     out_dir=os.path.join(output_dir, "tide_plots_consolidated"),
+    #     model_name=model_name,
+    #     rec_type="bbox",
+    # )
+
     # ------------------------------------------------------------------ #
-    # 3. Aggregate confusion matrix + summary bar chart                   #
+    # 5. Aggregate confusion matrix + summary bar chart                   #
     # ------------------------------------------------------------------ #
     if cms_by_dataset:
         plot_aggregate_confusion_matrix(
@@ -898,6 +960,24 @@ def main():
             out_path=os.path.join(cm_out_dir, f"{model_name}_cm_summary_bars.png"),
             model_name=model_name,
         )
+
+    # # ------------------------------------------------------------------ #
+    # # 6. Print consolidated TIDE error table                              #
+    # # ------------------------------------------------------------------ #
+    # print(f"\n{'='*60}")
+    # print(f"Consolidated TIDE errors for {model_name}:")
+    # all_errors = {
+    #     **consolidated_errors["main"]["consolidated"],
+    #     **consolidated_errors["special"]["consolidated"],
+    # }
+    # col_w = [max(len("Error Type"), max(len(k) for k in all_errors)), 10]
+    # div   = "  " + "---".join("-" * w for w in col_w)
+    # print(div.replace("-", "="))
+    # print("  " + "   ".join([f"{'Error Type':>{col_w[0]}}", f"{'Mean Δ mAP':>{col_w[1]}}"]))
+    # print(div)
+    # for k, v in all_errors.items():
+    #     print("  " + "   ".join([f"{k:>{col_w[0]}}", f"{v:>{col_w[1]}.3f}"]))
+    # print(div.replace("-", "="))
 
 
 if __name__ == "__main__":
