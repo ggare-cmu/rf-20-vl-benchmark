@@ -11,9 +11,12 @@ import numpy as np
 # RESULT_DIR = 'results/final_consolidated_results/dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_'
 # RESULT_DIR = '../dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
 # #MiPro
-RESULT_DIR = 'results/final_consolidated_results/dspy-baselines/results/eccv26/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+# RESULT_DIR = 'results/final_consolidated_results/dspy-baselines/results/eccv2/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+RESULT_DIR = 'results/eccv26/LVIS_baseline/Qwen3-VL-30B-A3B-Instruct/lvis_baseline_multiclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
+# RESULT_DIR = '
 ## RESULT_DIR = '../dspy-baselines/results/eccv26/mipro/Qwen3-VL-30B-A3B-Instruct/rf20_mipro_REF_LM_qwen_singleclass_rankScore/results/Qwen3-VL-30B-A3B-Instruct_instructions_vllm_serial_/'
-DATA_DIR = './datasets/rf100-vl-fsod'
+# DATA_DIR = './datasets/rf100-vl-fsod'
+DATA_DIR = './datasets/LVIS'
 
 all_dataset_dirs = {os.path.basename(d) : d for d in glob.glob(os.path.join(DATA_DIR, "*"))
                                if os.path.isdir(d) and os.path.exists(os.path.join(d, "test")) }
@@ -26,6 +29,9 @@ for d in os.listdir(RESULT_DIR):
     if(d.startswith("evaluation") or d.endswith(".pkl")):
         continue
     dataset_name = (d.split("_")[1]).split(".")[0]
+    if dataset_name == 'LVIS':
+        dataset_name = 'LVIS_FSOD'
+        
     print(f"dataset = {dataset_name}")
     dataset_dir = all_dataset_dirs[dataset_name]
     test_dir = os.path.join(dataset_dir, "test")
