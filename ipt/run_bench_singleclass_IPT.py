@@ -1085,7 +1085,7 @@ def method_refine_prompt(args, model, processor, class_name, current_instruction
     return current_instructions
 
 
-def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type):
+def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type, num_samples=None):
 
     # Original dataset instructions path - default from dataset README 
     org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
@@ -1108,6 +1108,20 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
 
     # Generate and refine the best instruction 
     altered_best_instruction = generate_refined_class_definition(args, model, processor, class_name, valSet_best_instructions)
+
+    # Subsample dataset is required
+    if num_samples is not None:
+        print(f"[Warning!] Limiting to {num_samples} samples per class for IPT val set eval pipeline.")
+
+        # train_dir = os.path.join(dataset_path, "train")
+        val_dir = os.path.join(dataset_path, "valid")
+        ann_path = os.path.join(val_dir, "_annotations.coco.json")
+        coco_gt = COCO(ann_path)
+        
+        ds_cat_ids = coco_gt.getCatIds()
+        coco_gt_subset = subsample_dataset(coco_gt, num_samples, ds_cat_ids)
+
+        coco_gt = coco_gt_subset
 
     # Evaluate original, initial, best, and final refined instructions
     valSet_best_mAP = -1.0
@@ -1132,7 +1146,8 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
             eval_class_name=class_name,
             eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
             siglip_pipe=siglip_pipe,
-            dataset_type="valid"
+            dataset_type="valid",
+            coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
         )
 
         #Restore seed state
@@ -1174,7 +1189,46 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
     return valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP
 
 
-     
+def subsample_dataset(coco_gt, num_samples, ds_cat_ids):
+
+    # Ensure we don't request more samples than available
+    # num_to_process = min(num_samples, len(coco_gt.dataset["images"]))
+    
+    # images_to_process = []
+    processed_imgs = []
+    for cat_id in ds_cat_ids:
+        cat_name = coco_gt.cats[cat_id]["name"]
+
+        # All images that have this category
+        img_ids = coco_gt.getImgIds(catIds=[cat_id])
+        
+
+        # Randomly choose up to 3 images
+        selected_img_ids = random.sample(img_ids, min(num_samples, len(img_ids)))
+        print(f"Category '{cat_name}' ({cat_id}): Selected {len(selected_img_ids)} images out of {len(img_ids)} available.\nSelected images: {selected_img_ids}")
+        
+        # images_to_process.extend([coco_gt.loadImgs(img_id)[0] for img_id in selected_img_ids])
+        processed_imgs.extend(selected_img_ids)
+    
+    # processed_img_ids = {img['id'] for img in processed_imgs}
+    processed_img_ids = set(processed_imgs)
+    print(f"Total unique images to process after sampling: {len(processed_img_ids)}")
+
+    # --- Create a subset of coco_gt for evaluation ---
+    
+    coco_gt_subset = COCO()
+    coco_gt_subset.dataset['info'] = coco_gt.dataset.get('info', {})
+    coco_gt_subset.dataset['licenses'] = coco_gt.dataset.get('licenses', [])
+    coco_gt_subset.dataset['images'] = [img for img in coco_gt.dataset['images'] if img['id'] in processed_img_ids]
+    coco_gt_subset.dataset['annotations'] = [ann for ann in coco_gt.dataset['annotations'] if ann['image_id'] in processed_img_ids] # Also need to filter annotations to only those images
+    coco_gt_subset.dataset['categories'] = coco_gt.dataset['categories']
+    coco_gt_subset.createIndex()
+    # --- End of subset creation ---
+
+    return coco_gt_subset
+
+
+
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
                                     num_samples=None, siglip_pipe=None):
     
@@ -1217,39 +1271,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     if num_samples is not None:
         print(f"[Warning!] Limiting to {num_samples} samples per class for iterative prompt refinement.")
 
-        # Ensure we don't request more samples than available
-        # num_to_process = min(num_samples, len(coco_gt.dataset["images"]))
-        
-        # images_to_process = []
-        processed_imgs = []
-        for cat_id in ds_cat_ids:
-            cat_name = coco_gt.cats[cat_id]["name"]
-
-            # All images that have this category
-            img_ids = coco_gt.getImgIds(catIds=[cat_id])
-            
-
-            # Randomly choose up to 3 images
-            selected_img_ids = random.sample(img_ids, min(num_samples, len(img_ids)))
-            print(f"Category '{cat_name}' ({cat_id}): Selected {len(selected_img_ids)} images out of {len(img_ids)} available.")
-            
-            # images_to_process.extend([coco_gt.loadImgs(img_id)[0] for img_id in selected_img_ids])
-            processed_imgs.extend(selected_img_ids)
-        
-        # processed_img_ids = {img['id'] for img in processed_imgs}
-        processed_img_ids = set(processed_imgs)
-        print(f"Total unique images to process after sampling: {len(processed_img_ids)}")
-
-        # --- Create a subset of coco_gt for evaluation ---
-        
-        coco_gt_subset = COCO()
-        coco_gt_subset.dataset['info'] = coco_gt.dataset.get('info', {})
-        coco_gt_subset.dataset['licenses'] = coco_gt.dataset.get('licenses', [])
-        coco_gt_subset.dataset['images'] = [img for img in coco_gt.dataset['images'] if img['id'] in processed_img_ids]
-        coco_gt_subset.dataset['annotations'] = [ann for ann in coco_gt.dataset['annotations'] if ann['image_id'] in processed_img_ids] # Also need to filter annotations to only those images
-        coco_gt_subset.dataset['categories'] = coco_gt.dataset['categories']
-        coco_gt_subset.createIndex()
-        # --- End of subset creation ---
+        coco_gt_subset = subsample_dataset(coco_gt, num_samples, ds_cat_ids)
 
         coco_gt = coco_gt_subset
 
@@ -1357,7 +1379,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
                             iter, instruction_refinements,
                             best_instructions, best_mAP,
                             prev_instructions, prev_mAP,
-                            num_samples=None,
+                            num_samples=num_samples,
                             stats_type=stats_type
                 )
 
@@ -1448,7 +1470,10 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         # --- Step 5: Evaluate instructions on ValSet to select best one ---
         
         #Evaluate all instructions on Val set to select the best one
-        valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type)
+        valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, 
+                                                                                        cat_id, dataset_name, dataset_path, dataset_result_dir, 
+                                                                                        siglip_pipe, stats_type,
+                                                                                        num_samples=num_samples)
         print(f"\nEvaluation of all instructions on validation set for class '{class_name}':\n{valSet_instruction_eval_result}")
         print(f"Best instructions on validation set for class '{class_name}' (mAP: {valSet_best_mAP:.4f}): \n{valSet_best_instructions}")
 
@@ -1536,7 +1561,8 @@ def run_single_dataset_evaluation(args):
             processor=processor,
             dataset_path=dataset_path,
             num_iterations=args.num_ipt_iterations,
-            siglip_pipe=siglip_pipe if args.siglip_rescore else None
+            siglip_pipe=siglip_pipe if args.siglip_rescore else None,
+            num_samples=args.num_samples,
         )
 
 
@@ -1577,6 +1603,7 @@ if __name__ == "__main__":
     parser.add_argument("--class_rescore", action="store_true", help="Use VQA-based class re-scoring of candidate masks")
     parser.add_argument("--ipt_mode", action="store_true", help="Enable Iterative Prompt Tuning (requires --dataset_path).")
     parser.add_argument("--num_ipt_iterations", type=int, default=3, help="Number of iterations for IPT.")
+    parser.add_argument("--num_samples", type=int, default=None, help="Number of few-shot samples to use for each class on both train and val sets for IPT.")
 
     parser.add_argument("--device_map_auto", action="store_true", help="Use device_map='auto' for model loading. Overrides --qwen_device if set.")
 
