@@ -1085,7 +1085,7 @@ def method_refine_prompt(args, model, processor, class_name, current_instruction
     return current_instructions
 
 
-def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type, num_samples=None):
+def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name, dataset_path, dataset_result_dir, siglip_pipe, stats_type, val_coco_gt=None):
 
     # Original dataset instructions path - default from dataset README 
     org_instructions_path = os.path.join(dataset_result_dir, f"{class_name}_original_definition.txt")
@@ -1109,19 +1109,6 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
     # Generate and refine the best instruction 
     altered_best_instruction = generate_refined_class_definition(args, model, processor, class_name, valSet_best_instructions)
 
-    # Subsample dataset is required
-    if num_samples is not None:
-        print(f"[Warning!] Limiting to {num_samples} samples per class for IPT val set eval pipeline.")
-
-        # train_dir = os.path.join(dataset_path, "train")
-        val_dir = os.path.join(dataset_path, "valid")
-        ann_path = os.path.join(val_dir, "_annotations.coco.json")
-        coco_gt = COCO(ann_path)
-        
-        ds_cat_ids = coco_gt.getCatIds()
-        coco_gt_subset = subsample_dataset(coco_gt, num_samples, ds_cat_ids)
-
-        coco_gt = coco_gt_subset
 
     # Evaluate original, initial, best, and final refined instructions
     valSet_best_mAP = -1.0
@@ -1147,7 +1134,7 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
             eval_cat_id=cat_id, #GRG: Pass the cat_id for evaluation
             siglip_pipe=siglip_pipe,
             dataset_type="valid",
-            coco_override=coco_gt if num_samples is not None else None, # Pass the coco_gt with limited samples if applicable
+            coco_override=val_coco_gt if val_coco_gt is not None else None, # Pass the coco_gt with limited samples if applicable
         )
 
         #Restore seed state
@@ -1189,44 +1176,306 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
     return valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP
 
 
-def subsample_dataset(coco_gt, num_samples, ds_cat_ids):
+# def subsample_dataset(coco_gt, num_samples, ds_cat_ids):
 
-    # Ensure we don't request more samples than available
-    # num_to_process = min(num_samples, len(coco_gt.dataset["images"]))
+#     # Ensure we don't request more samples than available
+#     # num_to_process = min(num_samples, len(coco_gt.dataset["images"]))
     
-    # images_to_process = []
-    processed_imgs = []
+#     # images_to_process = []
+#     processed_imgs = []
+#     for cat_id in ds_cat_ids:
+#         cat_name = coco_gt.cats[cat_id]["name"]
+
+#         # All images that have this category
+#         img_ids = coco_gt.getImgIds(catIds=[cat_id])
+        
+
+#         ann_ids = coco_gt.getAnnIds(imgIds=[chosen_img_id], catIds=[cat_id])
+#         anns = coco_gt.loadAnns(ann_ids)
+
+#         img_info_list = coco_gt.loadImgs(chosen_img_id)
+#         if not img_info_list:
+#             print(f"Warning! No image info found for image ID {chosen_img_id}. Skipping.")
+#             continue
+
+#         img_info = img_info_list[0]
+#         image_path = os.path.join(train_dir, img_info["file_name"])
+#         if not os.path.isfile(image_path):
+#             print(f"Warning! Image file not found: {image_path}. Skipping.")
+#             continue
+
+#         # Visualize GT boxes for THIS category only
+#         gt_bboxes = [ann['bbox'] for ann in anns if ann['category_id'] == cat_id] #GRG: Only consider GT boxes for the current class
+
+
+#         # Randomly choose up to 3 images
+#         selected_img_ids = random.sample(img_ids, min(num_samples, len(img_ids)))
+#         print(f"Category '{cat_name}' ({cat_id}): Selected {len(selected_img_ids)} images out of {len(img_ids)} available.\nSelected images: {selected_img_ids}")
+        
+#         # images_to_process.extend([coco_gt.loadImgs(img_id)[0] for img_id in selected_img_ids])
+#         processed_imgs.extend(selected_img_ids)
+    
+#     # processed_img_ids = {img['id'] for img in processed_imgs}
+#     processed_img_ids = set(processed_imgs)
+#     print(f"Total unique images to process after sampling: {len(processed_img_ids)}")
+
+#     # --- Create a subset of coco_gt for evaluation ---
+    
+#     coco_gt_subset = COCO()
+#     coco_gt_subset.dataset['info'] = coco_gt.dataset.get('info', {})
+#     coco_gt_subset.dataset['licenses'] = coco_gt.dataset.get('licenses', [])
+#     coco_gt_subset.dataset['images'] = [img for img in coco_gt.dataset['images'] if img['id'] in processed_img_ids]
+#     coco_gt_subset.dataset['annotations'] = [ann for ann in coco_gt.dataset['annotations'] if ann['image_id'] in processed_img_ids] # Also need to filter annotations to only those images
+#     coco_gt_subset.dataset['categories'] = coco_gt.dataset['categories']
+#     coco_gt_subset.createIndex()
+#     # --- End of subset creation ---
+
+#     return coco_gt_subset
+
+
+import logging
+def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_dataset.log"):
+
+    # ------------------------------------------------------------------
+    # 0. Set up file logger
+    # ------------------------------------------------------------------
+    logger = logging.getLogger("subsample_dataset")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    fh = logging.FileHandler(log_file, mode="w")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    logger.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(sh)
+
+    def log(msg=""):
+        logger.info(msg)
+
+    # ------------------------------------------------------------------
+    # 1. Build dataset_stats: img_id -> {cat_id -> bbox_count}
+    # ------------------------------------------------------------------
+    dataset_stats = {}
+
+    for cat_id in ds_cat_ids:
+        img_ids = coco_gt.getImgIds(catIds=[cat_id])
+        for img_id in img_ids:
+            ann_ids = coco_gt.getAnnIds(imgIds=[img_id], catIds=[cat_id])
+            count = len(ann_ids)
+            if count == 0:
+                continue
+            if img_id not in dataset_stats:
+                dataset_stats[img_id] = {}
+            dataset_stats[img_id][cat_id] = count
+
+    log(f"Dataset stats built: {len(dataset_stats)} candidate images across {len(ds_cat_ids)} classes.")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def recompute_achieved(selected):
+        """Recompute achieved counts from scratch given a set of selected img_ids."""
+        counts = {cat_id: 0 for cat_id in ds_cat_ids}
+        for img_id in selected:
+            for cat_id, count in dataset_stats[img_id].items():
+                if cat_id in counts:
+                    counts[cat_id] += count
+        return counts
+
+    def is_admissible_given(img_id, current_achieved):
+        """Check adding img_id won't push any class over num_samples."""
+        for cat_id, count in dataset_stats[img_id].items():
+            if cat_id in current_achieved:
+                if current_achieved[cat_id] + count > num_samples:
+                    return False
+        return True
+
+    def still_needed_given(img_id, current_achieved):
+        """Image is useful if at least one of its classes is under quota."""
+        return any(
+            current_achieved.get(cat_id, 0) < num_samples
+            for cat_id in dataset_stats[img_id]
+        )
+
+    def total_bbox_count(img_id):
+        return sum(dataset_stats[img_id].values())
+
+    def total_deficit(achieved):
+        return sum(max(0, num_samples - achieved[cat_id]) for cat_id in ds_cat_ids)
+
+    # ------------------------------------------------------------------
+    # 2. Min-gain greedy selection
+    # ------------------------------------------------------------------
+    achieved         = {cat_id: 0 for cat_id in ds_cat_ids}
+    selected_img_ids = set()
+    all_img_ids      = list(dataset_stats.keys())
+    random.shuffle(all_img_ids)
+
+    while not all(achieved[cat_id] >= num_samples for cat_id in ds_cat_ids):
+        candidates = [
+            img_id for img_id in all_img_ids
+            if img_id not in selected_img_ids
+            and is_admissible_given(img_id, achieved)
+            and still_needed_given(img_id, achieved)
+        ]
+
+        if not candidates:
+            log("Greedy phase exhausted — some classes may be under quota. Attempting swap phase.")
+            break
+
+        best_img = min(candidates, key=total_bbox_count)
+        selected_img_ids.add(best_img)
+
+        for cat_id, count in dataset_stats[best_img].items():
+            if cat_id in achieved:
+                achieved[cat_id] += count
+
+    log(f"After greedy phase: {len(selected_img_ids)} images selected. Deficit: {total_deficit(achieved)}")
+
+    # ------------------------------------------------------------------
+    # 3. Swap / reversal phase
+    #    For each under-quota class, try replacing one already-selected
+    #    image with a better candidate from outside the selected set,
+    #    such that:
+    #      - The swap reduces the total deficit
+    #      - No class exceeds num_samples after the swap
+    # ------------------------------------------------------------------
+    under_quota_cats = [cat_id for cat_id in ds_cat_ids if achieved[cat_id] < num_samples]
+
+    if under_quota_cats:
+        log(f"Swap phase: attempting swaps for {len(under_quota_cats)} under-quota classes...")
+
+        improved = True
+        swap_count = 0
+
+        while improved:
+            improved = False
+
+            for cat_id in under_quota_cats:
+                if achieved[cat_id] >= num_samples:
+                    continue  # already fixed in a prior swap iteration
+
+                deficit_before = total_deficit(achieved)
+
+                # Candidate replacements: images not yet selected that contain this class
+                swap_in_candidates = [
+                    img_id for img_id in all_img_ids
+                    if img_id not in selected_img_ids
+                    and cat_id in dataset_stats[img_id]
+                ]
+
+                best_swap = None
+                best_deficit_after = deficit_before  # only accept if we strictly improve
+
+                for swap_in in swap_in_candidates:
+                    # Try removing each selected image and see if swap_in fits
+                    for swap_out in list(selected_img_ids):
+
+                        # Simulate the swap
+                        trial_selected = (selected_img_ids - {swap_out}) | {swap_in}
+                        trial_achieved = recompute_achieved(trial_selected)
+
+                        # Hard constraint: no class overshoots
+                        if any(trial_achieved[c] > num_samples for c in ds_cat_ids):
+                            continue
+
+                        # Accept only if total deficit strictly improves
+                        deficit_after = total_deficit(trial_achieved)
+                        if deficit_after < best_deficit_after:
+                            best_deficit_after = deficit_after
+                            best_swap = (swap_out, swap_in, trial_selected, trial_achieved)
+
+                if best_swap is not None:
+                    swap_out, swap_in, trial_selected, trial_achieved = best_swap
+                    log(f"  Swap: removed IMG {swap_out}, added IMG {swap_in} "
+                        f"| deficit {deficit_before} -> {best_deficit_after}")
+                    selected_img_ids = trial_selected
+                    achieved = trial_achieved
+                    swap_count += 1
+                    improved = True  # trigger another pass in case chained swaps help
+
+        under_quota_cats = [cat_id for cat_id in ds_cat_ids if achieved[cat_id] < num_samples]
+        log(f"Swap phase complete: {swap_count} swap(s) made. "
+            f"Remaining deficit: {total_deficit(achieved)}. "
+            f"Under-quota classes: {len(under_quota_cats)}")
+    else:
+        log("No under-quota classes after greedy phase — swap phase skipped.")
+
+    # ------------------------------------------------------------------
+    # 4. Per-image breakdown
+    # ------------------------------------------------------------------
+    log()
+    log("=" * 70)
+    log(f"{'SELECTED IMAGE BREAKDOWN':^70}")
+    log("=" * 70)
+    for img_id in sorted(selected_img_ids):
+        img_info = coco_gt.loadImgs(img_id)[0]
+        class_str = ", ".join(
+            f"{coco_gt.cats[cat_id]['name']}×{count}"
+            for cat_id, count in sorted(dataset_stats[img_id].items())
+        )
+        log(f"  IMG {img_id:>6} | {img_info['file_name']:<40} | {class_str}")
+
+    # ------------------------------------------------------------------
+    # 4b. Overall stats
+    # ------------------------------------------------------------------
+    total_bboxes_selected = sum(achieved.values())
+    total_bboxes_possible = num_samples * len(ds_cat_ids)
+    classes_at_quota      = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] == num_samples)
+    classes_under_quota   = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] <  num_samples)
+    classes_over_quota    = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] >  num_samples)
+    avg_classes_per_img   = sum(len(dataset_stats[img_id]) for img_id in selected_img_ids) / max(len(selected_img_ids), 1)
+
+    log()
+    log("=" * 70)
+    log(f"{'OVERALL STATS':^70}")
+    log("=" * 70)
+    log(f"  Images selected          : {len(selected_img_ids)}")
+    log(f"  Target bboxes per class  : {num_samples}")
+    log(f"  Classes at quota         : {classes_at_quota} / {len(ds_cat_ids)}")
+    log(f"  Classes under quota      : {classes_under_quota} / {len(ds_cat_ids)}")
+    log(f"  Classes over quota       : {classes_over_quota} / {len(ds_cat_ids)}  (should be 0)")
+    log(f"  Total bboxes selected    : {total_bboxes_selected}")
+    log(f"  Total bboxes targeted    : {total_bboxes_possible}")
+    log(f"  Avg classes per image    : {avg_classes_per_img:.2f}")
+    log("=" * 70)
+    log(f"\n  {'Class':<20} {'Achieved':>10} {'Target':>10} {'Status':>10}")
+    log(f"  {'-' * 50}")
     for cat_id in ds_cat_ids:
         cat_name = coco_gt.cats[cat_id]["name"]
+        a = achieved[cat_id]
+        if a == num_samples:
+            status = "✓"
+        elif a < num_samples:
+            status = f"SHORT by {num_samples - a}"
+        else:
+            status = f"OVER by {a - num_samples}"
+        log(f"  {cat_name:<20} {a:>10} {num_samples:>10} {status:>10}")
+    log("=" * 70)
+    log(f"Log written to: {log_file}")
 
-        # All images that have this category
-        img_ids = coco_gt.getImgIds(catIds=[cat_id])
-        
-
-        # Randomly choose up to 3 images
-        selected_img_ids = random.sample(img_ids, min(num_samples, len(img_ids)))
-        print(f"Category '{cat_name}' ({cat_id}): Selected {len(selected_img_ids)} images out of {len(img_ids)} available.\nSelected images: {selected_img_ids}")
-        
-        # images_to_process.extend([coco_gt.loadImgs(img_id)[0] for img_id in selected_img_ids])
-        processed_imgs.extend(selected_img_ids)
-    
-    # processed_img_ids = {img['id'] for img in processed_imgs}
-    processed_img_ids = set(processed_imgs)
-    print(f"Total unique images to process after sampling: {len(processed_img_ids)}")
-
-    # --- Create a subset of coco_gt for evaluation ---
-    
+    # ------------------------------------------------------------------
+    # 5. Build the COCO subset
+    # ------------------------------------------------------------------
     coco_gt_subset = COCO()
-    coco_gt_subset.dataset['info'] = coco_gt.dataset.get('info', {})
-    coco_gt_subset.dataset['licenses'] = coco_gt.dataset.get('licenses', [])
-    coco_gt_subset.dataset['images'] = [img for img in coco_gt.dataset['images'] if img['id'] in processed_img_ids]
-    coco_gt_subset.dataset['annotations'] = [ann for ann in coco_gt.dataset['annotations'] if ann['image_id'] in processed_img_ids] # Also need to filter annotations to only those images
-    coco_gt_subset.dataset['categories'] = coco_gt.dataset['categories']
+    coco_gt_subset.dataset['info']        = coco_gt.dataset.get('info', {})
+    coco_gt_subset.dataset['licenses']    = coco_gt.dataset.get('licenses', [])
+    coco_gt_subset.dataset['categories']  = coco_gt.dataset['categories']
+    coco_gt_subset.dataset['images']      = [
+        img for img in coco_gt.dataset['images']
+        if img['id'] in selected_img_ids
+    ]
+    coco_gt_subset.dataset['annotations'] = [
+        ann for ann in coco_gt.dataset['annotations']
+        if ann['image_id'] in selected_img_ids
+    ]
     coco_gt_subset.createIndex()
-    # --- End of subset creation ---
 
     return coco_gt_subset
-
 
 
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
@@ -1268,14 +1517,6 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     cat_dict = {cat_id: coco_gt.cats[cat_id]["name"] for cat_id in ds_cat_ids}
     print(f"Categories in {dataset_name}: {cat_dict}")
 
-    if num_samples is not None:
-        print(f"[Warning!] Limiting to {num_samples} samples per class for iterative prompt refinement.")
-
-        coco_gt_subset = subsample_dataset(coco_gt, num_samples, ds_cat_ids)
-
-        coco_gt = coco_gt_subset
-
-
     #Create output directory for saving results
     result_dir = os.path.join(args.output_dir, "iterative_prompt_refinement")
     os.makedirs(result_dir, exist_ok=True)
@@ -1285,6 +1526,33 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
     dataset_result_dir = os.path.join(result_dir, dataset_name)
     os.makedirs(dataset_result_dir, exist_ok=True)
 
+    if num_samples is not None:
+
+        utils.set_seed(args.seed)
+
+        print(f"[Warning!] Limiting to {num_samples} samples per class for iterative prompt refinement.")
+
+        coco_gt_subset = subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file=os.path.join(dataset_result_dir, f"subsample_train_dataset.log"))
+
+        coco_gt = coco_gt_subset
+
+
+        #Do this for Val set
+        print(f"[Warning!] Limiting to {num_samples} samples per class for IPT val set eval pipeline.")
+
+        # train_dir = os.path.join(dataset_path, "train")
+        val_dir = os.path.join(dataset_path, "valid")
+        val_ann_path = os.path.join(val_dir, "_annotations.coco.json")
+        val_coco_gt = COCO(val_ann_path)
+        
+        val_ds_cat_ids = val_coco_gt.getCatIds()
+        val_coco_gt_subset = subsample_dataset(val_coco_gt, num_samples, val_ds_cat_ids, log_file=os.path.join(dataset_result_dir, f"subsample_val_dataset.log"))
+
+        val_coco_gt = val_coco_gt_subset
+
+
+    utils.set_seed(args.seed)
+    
     # --- Resume Logic ---
     all_iterm_refined_instructions_path = os.path.join(result_dir, f"all_iterm_refined_class_instructions_{dataset_name}.json")
     refined_class_instructions_json = {}
@@ -1473,7 +1741,7 @@ def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterat
         valSet_instruction_eval_result, valSet_best_instructions, valSet_best_mAP = method_eval_on_val(args, model, processor, class_name, 
                                                                                         cat_id, dataset_name, dataset_path, dataset_result_dir, 
                                                                                         siglip_pipe, stats_type,
-                                                                                        num_samples=num_samples)
+                                                                                        val_coco_gt=val_coco_gt)
         print(f"\nEvaluation of all instructions on validation set for class '{class_name}':\n{valSet_instruction_eval_result}")
         print(f"Best instructions on validation set for class '{class_name}' (mAP: {valSet_best_mAP:.4f}): \n{valSet_best_instructions}")
 
