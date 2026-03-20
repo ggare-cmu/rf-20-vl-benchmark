@@ -1233,6 +1233,250 @@ def method_eval_on_val(args, model, processor, class_name, cat_id, dataset_name,
 #     return coco_gt_subset
 
 
+# import logging
+# def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_dataset.log"):
+
+#     # ------------------------------------------------------------------
+#     # 0. Set up file logger
+#     # ------------------------------------------------------------------
+#     logger = logging.getLogger("subsample_dataset")
+#     logger.setLevel(logging.INFO)
+#     logger.handlers.clear()
+
+#     fh = logging.FileHandler(log_file, mode="w")
+#     fh.setLevel(logging.INFO)
+#     fh.setFormatter(logging.Formatter("%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+#     logger.addHandler(fh)
+
+#     sh = logging.StreamHandler()
+#     sh.setLevel(logging.INFO)
+#     sh.setFormatter(logging.Formatter("%(message)s"))
+#     logger.addHandler(sh)
+
+#     def log(msg=""):
+#         logger.info(msg)
+
+#     # ------------------------------------------------------------------
+#     # 1. Build dataset_stats: img_id -> {cat_id -> bbox_count}
+#     # ------------------------------------------------------------------
+#     dataset_stats = {}
+
+#     for cat_id in ds_cat_ids:
+#         img_ids = coco_gt.getImgIds(catIds=[cat_id])
+#         for img_id in img_ids:
+#             ann_ids = coco_gt.getAnnIds(imgIds=[img_id], catIds=[cat_id])
+#             count = len(ann_ids)
+#             if count == 0:
+#                 continue
+#             if img_id not in dataset_stats:
+#                 dataset_stats[img_id] = {}
+#             dataset_stats[img_id][cat_id] = count
+
+#     log(f"Dataset stats built: {len(dataset_stats)} candidate images across {len(ds_cat_ids)} classes.")
+
+#     # ------------------------------------------------------------------
+#     # Helpers
+#     # ------------------------------------------------------------------
+#     def recompute_achieved(selected):
+#         """Recompute achieved counts from scratch given a set of selected img_ids."""
+#         counts = {cat_id: 0 for cat_id in ds_cat_ids}
+#         for img_id in selected:
+#             for cat_id, count in dataset_stats[img_id].items():
+#                 if cat_id in counts:
+#                     counts[cat_id] += count
+#         return counts
+
+#     def is_admissible_given(img_id, current_achieved):
+#         """Check adding img_id won't push any class over num_samples."""
+#         for cat_id, count in dataset_stats[img_id].items():
+#             if cat_id in current_achieved:
+#                 if current_achieved[cat_id] + count > num_samples:
+#                     return False
+#         return True
+
+#     def still_needed_given(img_id, current_achieved):
+#         """Image is useful if at least one of its classes is under quota."""
+#         return any(
+#             current_achieved.get(cat_id, 0) < num_samples
+#             for cat_id in dataset_stats[img_id]
+#         )
+
+#     def total_bbox_count(img_id):
+#         return sum(dataset_stats[img_id].values())
+
+#     def total_deficit(achieved):
+#         return sum(max(0, num_samples - achieved[cat_id]) for cat_id in ds_cat_ids)
+
+#     # ------------------------------------------------------------------
+#     # 2. Min-gain greedy selection
+#     # ------------------------------------------------------------------
+#     achieved         = {cat_id: 0 for cat_id in ds_cat_ids}
+#     selected_img_ids = set()
+#     all_img_ids      = list(dataset_stats.keys())
+#     random.shuffle(all_img_ids)
+
+#     while not all(achieved[cat_id] >= num_samples for cat_id in ds_cat_ids):
+#         candidates = [
+#             img_id for img_id in all_img_ids
+#             if img_id not in selected_img_ids
+#             and is_admissible_given(img_id, achieved)
+#             and still_needed_given(img_id, achieved)
+#         ]
+
+#         if not candidates:
+#             log("Greedy phase exhausted — some classes may be under quota. Attempting swap phase.")
+#             break
+
+#         best_img = min(candidates, key=total_bbox_count)
+#         selected_img_ids.add(best_img)
+
+#         for cat_id, count in dataset_stats[best_img].items():
+#             if cat_id in achieved:
+#                 achieved[cat_id] += count
+
+#     log(f"After greedy phase: {len(selected_img_ids)} images selected. Deficit: {total_deficit(achieved)}")
+
+#     # ------------------------------------------------------------------
+#     # 3. Swap / reversal phase
+#     #    For each under-quota class, try replacing one already-selected
+#     #    image with a better candidate from outside the selected set,
+#     #    such that:
+#     #      - The swap reduces the total deficit
+#     #      - No class exceeds num_samples after the swap
+#     # ------------------------------------------------------------------
+#     under_quota_cats = [cat_id for cat_id in ds_cat_ids if achieved[cat_id] < num_samples]
+
+#     if under_quota_cats:
+#         log(f"Swap phase: attempting swaps for {len(under_quota_cats)} under-quota classes...")
+
+#         improved = True
+#         swap_count = 0
+
+#         while improved:
+#             improved = False
+
+#             for cat_id in under_quota_cats:
+#                 if achieved[cat_id] >= num_samples:
+#                     continue  # already fixed in a prior swap iteration
+
+#                 deficit_before = total_deficit(achieved)
+
+#                 # Candidate replacements: images not yet selected that contain this class
+#                 swap_in_candidates = [
+#                     img_id for img_id in all_img_ids
+#                     if img_id not in selected_img_ids
+#                     and cat_id in dataset_stats[img_id]
+#                 ]
+
+#                 best_swap = None
+#                 best_deficit_after = deficit_before  # only accept if we strictly improve
+
+#                 for swap_in in swap_in_candidates:
+#                     # Try removing each selected image and see if swap_in fits
+#                     for swap_out in list(selected_img_ids):
+
+#                         # Simulate the swap
+#                         trial_selected = (selected_img_ids - {swap_out}) | {swap_in}
+#                         trial_achieved = recompute_achieved(trial_selected)
+
+#                         # Hard constraint: no class overshoots
+#                         if any(trial_achieved[c] > num_samples for c in ds_cat_ids):
+#                             continue
+
+#                         # Accept only if total deficit strictly improves
+#                         deficit_after = total_deficit(trial_achieved)
+#                         if deficit_after < best_deficit_after:
+#                             best_deficit_after = deficit_after
+#                             best_swap = (swap_out, swap_in, trial_selected, trial_achieved)
+
+#                 if best_swap is not None:
+#                     swap_out, swap_in, trial_selected, trial_achieved = best_swap
+#                     log(f"  Swap: removed IMG {swap_out}, added IMG {swap_in} "
+#                         f"| deficit {deficit_before} -> {best_deficit_after}")
+#                     selected_img_ids = trial_selected
+#                     achieved = trial_achieved
+#                     swap_count += 1
+#                     improved = True  # trigger another pass in case chained swaps help
+
+#         under_quota_cats = [cat_id for cat_id in ds_cat_ids if achieved[cat_id] < num_samples]
+#         log(f"Swap phase complete: {swap_count} swap(s) made. "
+#             f"Remaining deficit: {total_deficit(achieved)}. "
+#             f"Under-quota classes: {len(under_quota_cats)}")
+#     else:
+#         log("No under-quota classes after greedy phase — swap phase skipped.")
+
+#     # ------------------------------------------------------------------
+#     # 4. Per-image breakdown
+#     # ------------------------------------------------------------------
+#     log()
+#     log("=" * 70)
+#     log(f"{'SELECTED IMAGE BREAKDOWN':^70}")
+#     log("=" * 70)
+#     for img_id in sorted(selected_img_ids):
+#         img_info = coco_gt.loadImgs(img_id)[0]
+#         class_str = ", ".join(
+#             f"{coco_gt.cats[cat_id]['name']}×{count}"
+#             for cat_id, count in sorted(dataset_stats[img_id].items())
+#         )
+#         log(f"  IMG {img_id:>6} | {img_info['file_name']:<40} | {class_str}")
+
+#     # ------------------------------------------------------------------
+#     # 4b. Overall stats
+#     # ------------------------------------------------------------------
+#     total_bboxes_selected = sum(achieved.values())
+#     total_bboxes_possible = num_samples * len(ds_cat_ids)
+#     classes_at_quota      = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] == num_samples)
+#     classes_under_quota   = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] <  num_samples)
+#     classes_over_quota    = sum(1 for cat_id in ds_cat_ids if achieved[cat_id] >  num_samples)
+#     avg_classes_per_img   = sum(len(dataset_stats[img_id]) for img_id in selected_img_ids) / max(len(selected_img_ids), 1)
+
+#     log()
+#     log("=" * 70)
+#     log(f"{'OVERALL STATS':^70}")
+#     log("=" * 70)
+#     log(f"  Images selected          : {len(selected_img_ids)}")
+#     log(f"  Target bboxes per class  : {num_samples}")
+#     log(f"  Classes at quota         : {classes_at_quota} / {len(ds_cat_ids)}")
+#     log(f"  Classes under quota      : {classes_under_quota} / {len(ds_cat_ids)}")
+#     log(f"  Classes over quota       : {classes_over_quota} / {len(ds_cat_ids)}  (should be 0)")
+#     log(f"  Total bboxes selected    : {total_bboxes_selected}")
+#     log(f"  Total bboxes targeted    : {total_bboxes_possible}")
+#     log(f"  Avg classes per image    : {avg_classes_per_img:.2f}")
+#     log("=" * 70)
+#     log(f"\n  {'Class':<20} {'Achieved':>10} {'Target':>10} {'Status':>10}")
+#     log(f"  {'-' * 50}")
+#     for cat_id in ds_cat_ids:
+#         cat_name = coco_gt.cats[cat_id]["name"]
+#         a = achieved[cat_id]
+#         if a == num_samples:
+#             status = "✓"
+#         elif a < num_samples:
+#             status = f"SHORT by {num_samples - a}"
+#         else:
+#             status = f"OVER by {a - num_samples}"
+#         log(f"  {cat_name:<20} {a:>10} {num_samples:>10} {status:>10}")
+#     log("=" * 70)
+#     log(f"Log written to: {log_file}")
+
+#     # ------------------------------------------------------------------
+#     # 5. Build the COCO subset
+#     # ------------------------------------------------------------------
+#     coco_gt_subset = COCO()
+#     coco_gt_subset.dataset['info']        = coco_gt.dataset.get('info', {})
+#     coco_gt_subset.dataset['licenses']    = coco_gt.dataset.get('licenses', [])
+#     coco_gt_subset.dataset['categories']  = coco_gt.dataset['categories']
+#     coco_gt_subset.dataset['images']      = [
+#         img for img in coco_gt.dataset['images']
+#         if img['id'] in selected_img_ids
+#     ]
+#     coco_gt_subset.dataset['annotations'] = [
+#         ann for ann in coco_gt.dataset['annotations']
+#         if ann['image_id'] in selected_img_ids
+#     ]
+#     coco_gt_subset.createIndex()
+
+#     return coco_gt_subset
+
 import logging
 def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_dataset.log"):
 
@@ -1308,12 +1552,57 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
         return sum(max(0, num_samples - achieved[cat_id]) for cat_id in ds_cat_ids)
 
     # ------------------------------------------------------------------
-    # 2. Min-gain greedy selection
+    # 2. Pre-selection phase: guarantee at least 1 image per class
+    #    Pick the image with the fewest bboxes for that class to
+    #    minimise quota consumption before the greedy phase begins.
     # ------------------------------------------------------------------
     achieved         = {cat_id: 0 for cat_id in ds_cat_ids}
     selected_img_ids = set()
     all_img_ids      = list(dataset_stats.keys())
     random.shuffle(all_img_ids)
+
+    log("Pre-selection phase: ensuring at least 1 image per class...")
+    for cat_id in ds_cat_ids:
+        cat_name = coco_gt.cats[cat_id]["name"]
+
+        # Already covered — an earlier pre-selected image contains this class
+        if achieved[cat_id] > 0:
+            log(f"  '{cat_name}' already covered by a previously pre-selected image. Skipping.")
+            continue
+
+        # Candidates: images containing this class that are admissible
+        candidates = [
+            img_id for img_id in all_img_ids
+            if cat_id in dataset_stats[img_id]
+            and is_admissible_given(img_id, achieved)
+        ]
+
+        if not candidates:
+            log(f"  WARNING: No admissible image found for class '{cat_name}' — "
+                f"it may already be at quota from a multi-class pre-selected image, "
+                f"or no valid image exists.")
+            continue
+
+        # Pick image with fewest bboxes for this specific class to stay close to quota
+        best_img = min(candidates, key=lambda img_id: dataset_stats[img_id][cat_id])
+
+        if best_img not in selected_img_ids:
+            selected_img_ids.add(best_img)
+            for c, cnt in dataset_stats[best_img].items():
+                if c in achieved:
+                    achieved[c] += cnt
+            log(f"  '{cat_name}': pre-selected IMG {best_img} "
+                f"(contributes: {', '.join(f'{coco_gt.cats[c][\"name\"]}×{cnt}' for c, cnt in dataset_stats[best_img].items())})")
+        else:
+            # Image was already pre-selected for another class and covers this one too
+            log(f"  '{cat_name}': already covered by IMG {best_img} selected for another class.")
+
+    log(f"Pre-selection complete: {len(selected_img_ids)} images, deficit: {total_deficit(achieved)}")
+
+    # ------------------------------------------------------------------
+    # 3. Min-gain greedy selection (fills remaining quota)
+    # ------------------------------------------------------------------
+    log("Greedy phase: filling remaining quota...")
 
     while not all(achieved[cat_id] >= num_samples for cat_id in ds_cat_ids):
         candidates = [
@@ -1337,7 +1626,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
     log(f"After greedy phase: {len(selected_img_ids)} images selected. Deficit: {total_deficit(achieved)}")
 
     # ------------------------------------------------------------------
-    # 3. Swap / reversal phase
+    # 4. Swap / reversal phase
     #    For each under-quota class, try replacing one already-selected
     #    image with a better candidate from outside the selected set,
     #    such that:
@@ -1349,7 +1638,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
     if under_quota_cats:
         log(f"Swap phase: attempting swaps for {len(under_quota_cats)} under-quota classes...")
 
-        improved = True
+        improved  = True
         swap_count = 0
 
         while improved:
@@ -1361,22 +1650,27 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
 
                 deficit_before = total_deficit(achieved)
 
-                # Candidate replacements: images not yet selected that contain this class
                 swap_in_candidates = [
                     img_id for img_id in all_img_ids
                     if img_id not in selected_img_ids
                     and cat_id in dataset_stats[img_id]
                 ]
 
-                best_swap = None
-                best_deficit_after = deficit_before  # only accept if we strictly improve
+                best_swap        = None
+                best_deficit_after = deficit_before
 
                 for swap_in in swap_in_candidates:
-                    # Try removing each selected image and see if swap_in fits
                     for swap_out in list(selected_img_ids):
 
-                        # Simulate the swap
-                        trial_selected = (selected_img_ids - {swap_out}) | {swap_in}
+                        # Guard: don't swap out an image that is the sole
+                        # representative of any class (would violate min-1 guarantee)
+                        trial_selected = selected_img_ids - {swap_out}
+                        trial_achieved_without = recompute_achieved(trial_selected)
+                        if any(trial_achieved_without[c] == 0 for c in ds_cat_ids):
+                            continue
+
+                        # Simulate full swap
+                        trial_selected = trial_selected | {swap_in}
                         trial_achieved = recompute_achieved(trial_selected)
 
                         # Hard constraint: no class overshoots
@@ -1394,9 +1688,9 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
                     log(f"  Swap: removed IMG {swap_out}, added IMG {swap_in} "
                         f"| deficit {deficit_before} -> {best_deficit_after}")
                     selected_img_ids = trial_selected
-                    achieved = trial_achieved
-                    swap_count += 1
-                    improved = True  # trigger another pass in case chained swaps help
+                    achieved         = trial_achieved
+                    swap_count      += 1
+                    improved         = True  # trigger another pass in case chained swaps help
 
         under_quota_cats = [cat_id for cat_id in ds_cat_ids if achieved[cat_id] < num_samples]
         log(f"Swap phase complete: {swap_count} swap(s) made. "
@@ -1406,7 +1700,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
         log("No under-quota classes after greedy phase — swap phase skipped.")
 
     # ------------------------------------------------------------------
-    # 4. Per-image breakdown
+    # 5. Per-image breakdown
     # ------------------------------------------------------------------
     log()
     log("=" * 70)
@@ -1421,7 +1715,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
         log(f"  IMG {img_id:>6} | {img_info['file_name']:<40} | {class_str}")
 
     # ------------------------------------------------------------------
-    # 4b. Overall stats
+    # 5b. Overall stats
     # ------------------------------------------------------------------
     total_bboxes_selected = sum(achieved.values())
     total_bboxes_possible = num_samples * len(ds_cat_ids)
@@ -1459,7 +1753,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
     log(f"Log written to: {log_file}")
 
     # ------------------------------------------------------------------
-    # 5. Build the COCO subset
+    # 6. Build the COCO subset
     # ------------------------------------------------------------------
     coco_gt_subset = COCO()
     coco_gt_subset.dataset['info']        = coco_gt.dataset.get('info', {})
@@ -1477,7 +1771,7 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
 
     return coco_gt_subset
 
-
+    
 def iterative_prompt_refinement(args, model, processor, dataset_path, num_iterations=3,
                                     num_samples=None, siglip_pipe=None):
     
