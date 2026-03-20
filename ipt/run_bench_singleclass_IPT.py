@@ -1591,8 +1591,11 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
             for c, cnt in dataset_stats[best_img].items():
                 if c in achieved:
                     achieved[c] += cnt
-            log(f"  '{cat_name}': pre-selected IMG {best_img} "
-                f"(contributes: {', '.join(f'{coco_gt.cats[c][\"name\"]}×{cnt}' for c, cnt in dataset_stats[best_img].items())})")
+            contributions = ", ".join(
+                f"{coco_gt.cats[c]['name']}x{cnt}"
+                for c, cnt in dataset_stats[best_img].items()
+            )
+            log(f"  '{cat_name}': pre-selected IMG {best_img} (contributes: {contributions})")
         else:
             # Image was already pre-selected for another class and covers this one too
             log(f"  '{cat_name}': already covered by IMG {best_img} selected for another class.")
