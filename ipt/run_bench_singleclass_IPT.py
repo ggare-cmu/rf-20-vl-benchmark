@@ -1570,21 +1570,39 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
             log(f"  '{cat_name}' already covered by a previously pre-selected image. Skipping.")
             continue
 
-        # Candidates: images containing this class that are admissible
+        # First try: strictly admissible candidates (no overshoot)
         candidates = [
             img_id for img_id in all_img_ids
             if cat_id in dataset_stats[img_id]
             and is_admissible_given(img_id, achieved)
         ]
 
-        if not candidates:
-            log(f"  WARNING: No admissible image found for class '{cat_name}' — "
-                f"it may already be at quota from a multi-class pre-selected image, "
-                f"or no valid image exists.")
-            continue
+        if candidates:
+            best_img = min(candidates, key=lambda img_id: dataset_stats[img_id][cat_id])
+            strict = True
+        else:
+            # Fallback: relax admissibility — pick image that causes least overshoot
+            # across all classes for this category, accepting minimal quota violation
+            log(f"  '{cat_name}': no strictly admissible image found — "
+                f"falling back to least-overshoot candidate.")
+            all_candidates = [
+                img_id for img_id in all_img_ids
+                if cat_id in dataset_stats[img_id]
+            ]
+            if not all_candidates:
+                log(f"  WARNING: No image at all found for class '{cat_name}'. Skipping.")
+                continue
 
-        # Pick image with fewest bboxes for this specific class to stay close to quota
-        best_img = min(candidates, key=lambda img_id: dataset_stats[img_id][cat_id])
+            def overshoot_score(img_id):
+                """Total overshoot across all classes if this image were added."""
+                return sum(
+                    max(0, achieved.get(c, 0) + cnt - num_samples)
+                    for c, cnt in dataset_stats[img_id].items()
+                    if c in ds_cat_ids
+                )
+
+            best_img = min(all_candidates, key=overshoot_score)
+            strict = False
 
         if best_img not in selected_img_ids:
             selected_img_ids.add(best_img)
@@ -1595,7 +1613,8 @@ def subsample_dataset(coco_gt, num_samples, ds_cat_ids, log_file="subsample_data
                 f"{coco_gt.cats[c]['name']}x{cnt}"
                 for c, cnt in dataset_stats[best_img].items()
             )
-            log(f"  '{cat_name}': pre-selected IMG {best_img} (contributes: {contributions})")
+            tag = "" if strict else " [FALLBACK — may exceed quota]"
+            log(f"  '{cat_name}': pre-selected IMG {best_img}{tag} (contributes: {contributions})")
         else:
             # Image was already pre-selected for another class and covers this one too
             log(f"  '{cat_name}': already covered by IMG {best_img} selected for another class.")
