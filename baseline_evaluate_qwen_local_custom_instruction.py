@@ -10,6 +10,7 @@ import logging
 import argparse
 import pickle
 import copy
+import ast
 from qwen_vl_utils import smart_resize #expects qwen-vl-utils==0.0.8
 from utils.qwen_eval_utils import *
 from utils.shared_eval_utils import *
@@ -366,6 +367,30 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
             instructions = f.read().strip()
             logger.info(f"Loaded instructions from {readme_path} for {dataset_name}")
             final_query_text_instructions_standalone = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}.\n\nUse the following annotator instructions to improve detection accuracy:\n{instructions}\n"
+    elif args.instruction_type == "ipt":
+        ipt_file = os.path.join(args.instruction_path, f"all_refined_class_instructions_{dataset_name}.json")
+        logger.info(f"Using 'ipt' refined per-class instructions for dataset {dataset_name} from {ipt_file}")
+        with open(ipt_file, 'r') as f:
+            per_class = json.load(f)
+
+        parts = []
+        for cls_name, raw in per_class.items():
+            desc = raw
+            if isinstance(raw, str):
+                try:
+                    parsed = ast.literal_eval(raw)
+                    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+                        desc = parsed[0].get(cls_name) or next(iter(parsed[0].values()))
+                    elif isinstance(parsed, dict):
+                        desc = parsed.get(cls_name) or next(iter(parsed.values()))
+                except (ValueError, SyntaxError):
+                    desc = raw
+            parts.append(f"{cls_name}: {desc}")
+
+        instructions = "\n\n".join(parts)
+        instructions_system_prompt = SYSTEM_PROMPT
+        final_query_text_instructions_standalone = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}.\n\nUse the following annotator instructions to improve detection accuracy:\n{instructions}\n"
+        logger.info(f"instructions: {final_query_text_instructions_standalone}\nsystem prompt: {instructions_system_prompt}")
     else:
         raise ValueError("Invalid instruction type specified. Use --instruction_type with 'default' or provide a valid --instruction_path.")
     
@@ -795,8 +820,8 @@ def main():
     parser.add_argument("--cuda", type=int, default=0, help="CUDA device id to use")
     parser.add_argument("--parallel", action='store_true', help="Whether to divide datasets and run them on different GPUs")
     parser.add_argument("--debug", action='store_true')
-    parser.add_argument('--instruction_type', type=str, default=None, 
-                        help='gepa: for gepa optimized instructions, mipro: for gepa optimized instructions, default: for original instructions, ')
+    parser.add_argument('--instruction_type', type=str, default=None,
+                        help='gepa: gepa optimized instructions, mipro: mipro optimized instructions, default: original README instructions, ipt: per-class refined instructions concatenated from all_refined_class_instructions_<dataset>.json')
     parser.add_argument('--instruction_path', type=str, default=None, 
                         help='Path to instruction file')
 
