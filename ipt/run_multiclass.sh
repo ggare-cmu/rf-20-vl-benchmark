@@ -14,12 +14,22 @@ DATASET_ROOT="./datasets/rf100-vl-fsod/"
 METHOD="gepa" #gepa, mipro
 REFLECTION_LM="qwen" #qwen, openai
 
-RESULTSDIR="../dspy-baselines/results/eccv26/$METHOD/$MODEL_NAME/rf20_"$METHOD"_REF_LM_"$REFLECTION_LM"_singleclass_rankScore"
+# RESULTSDIR="../dspy-baselines/results/eccv26/$METHOD/$MODEL_NAME/rf20_"$METHOD"_REF_LM_"$REFLECTION_LM"_singleclass_rankScore"
+# RESULTSDIR="./dspy-baselines/results/eccv26/$METHOD/$MODEL_NAME/rf20_"$METHOD"_REF_LM_"$REFLECTION_LM"_multiclass_modelScore"
+# dspy-baselines/results/eccv26/gepa/Qwen3-VL-8B-Instruct/rf20_gepa_REF_LM_qwen_multiclass_modelScore
 
 # CMD_TEMPLATE="python3 baseline_evaluate_qwen_local_custom_instruction.py --data_dir $DATASET_ROOT --model_name $MODEL_NAME --save_dir $RESULTSDIR --vllm --just_instructions --instruction_type $METHOD --instruction_path $RESULTSDIR/$METHOD"
-CMD_TEMPLATE="CUDA_VISIBLE_DEVICES=0,1,2,3 python3 baseline_evaluate_qwen_local_custom_instruction.py --data_dir $DATASET_ROOT --model_name $MODEL_NAME --save_dir $RESULTSDIR --vllm --just_instructions --instruction_type $METHOD --instruction_path $RESULTSDIR/$METHOD"
+# CMD_TEMPLATE="CUDA_VISIBLE_DEVICES=0,1,2,3 python3 baseline_evaluate_qwen_local_custom_instruction.py --data_dir $DATASET_ROOT --model_name $MODEL_NAME --save_dir $RESULTSDIR --vllm --just_instructions --instruction_type $METHOD --instruction_path $RESULTSDIR/$METHOD"
 # CMD_TEMPLATE="source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && conda activate qwen-vllm-env && python ipt/1run_rescorer.py --model_name $MODEL_NAME --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir $RESULTSDIR --vqa_batch_size 1"
 # CMD_TEMPLATE="python ipt/1run_rescorer.py --model_name Qwen3-VL-235B-A22B-Instruct-FP8 --ipt_mode --vqa_rescore --apply_nms --nms_threshold 0.5 --num_ipt_iterations 10 --output_dir results/rf100vl_IPT/Qwen3-VL-235B-A22B-Instruct-FP8/rf20_IPT_singleclass_vqaScore_withNMS --vqa_batch_size 1"
+
+# #Baseline - classNamesOnly
+# RESULTSDIR="./dspy-baselines/results/eccv26/$METHOD/$MODEL_NAME/rf20_baseline_className_multiclass_modelScore"
+# CMD_TEMPLATE="python3 baseline_evaluate_qwen_local_custom_instruction.py --data_dir $DATASET_ROOT --model_name $MODEL_NAME --save_dir $RESULTSDIR --vllm --instruction_type default"
+
+#Baseline - withInstruction
+RESULTSDIR="./dspy-baselines/results/eccv26/$METHOD/$MODEL_NAME/rf20_baseline_withInstruction_multiclass_modelScore"
+CMD_TEMPLATE="python3 baseline_evaluate_qwen_local_custom_instruction.py --data_dir $DATASET_ROOT --model_name $MODEL_NAME --save_dir $RESULTSDIR --vllm --just_instructions --instruction_type default"
 
 
 # DATASETS=(

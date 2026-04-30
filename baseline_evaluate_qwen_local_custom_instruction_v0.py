@@ -335,11 +335,6 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
     dataset_name = os.path.basename(dataset_dir)
     train_folder = os.path.join(dataset_dir, "train")
 
-    basic_system_prompt = SYSTEM_PROMPT
-
-    category_prompt = ", ".join(categories)
-    final_query_text_basic = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}." # Saying (each of those is a separate class) might be helpful, but dropped for now
-
     instructions = ""
     if args.instruction_type == "gepa":
         #load json instructions
@@ -360,15 +355,18 @@ def precompute_prompts_for_dataset_qwen(args, dataset_dir, categories, categorie
         final_query_text_instructions_standalone = instructions["signature"]["instructions"]
         logger.info(f"instructions: {final_query_text_instructions_standalone}\nsystem prompt: {instructions_system_prompt}")
     elif args.instruction_type == "default":
-        instructions_system_prompt = SYSTEM_PROMPT
         readme_path = os.path.join(dataset_dir, "README.dataset.txt")
         with open(readme_path, 'r') as f:
             instructions = f.read().strip()
             logger.info(f"Loaded instructions from {readme_path} for {dataset_name}")
-            final_query_text_instructions_standalone = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}.\n\nUse the following annotator instructions to improve detection accuracy:\n{instructions}\n"
     else:
         raise ValueError("Invalid instruction type specified. Use --instruction_type with 'default' or provide a valid --instruction_path.")
     
+    basic_system_prompt = SYSTEM_PROMPT
+
+    category_prompt = ", ".join(categories)
+    final_query_text_basic = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}." # Saying (each of those is a separate class) might be helpful, but dropped for now
+
     # instructions_system_prompt = basic_system_prompt
     # if instructions:
     #      final_query_text_instructions_standalone = f"Locate all of the following objects: {category_prompt} in the image and output the coordinates in JSON format like {{\"bbox_2d\":[x1,y1,x2,y2],\"label\":\"class_name\"}}.\n\nUse the following annotator instructions to improve detection accuracy:\n{instructions}\n"
@@ -733,47 +731,6 @@ def process_dataset(args, model, processor, dataset_dir, few_shot, just_instruct
 
     return results_file, final_results_list, processed_count, error_count, skipped_count
 
-def is_dataset_fully_done(dataset_dir, output_dir_root):
-    """Return True if this dataset has already been fully processed in `output_dir_root`.
-
-    Primary signal: the final `predictions_<dataset>.json` file exists and parses as a
-    list. `process_dataset` only writes it once after iterating every test image, so
-    its presence means a complete pass finished. Fallback: the per-image status pickle
-    marks every test image True (used when a future run actually populates it)."""
-    dataset_name = os.path.basename(dataset_dir)
-
-    results_file = os.path.join(output_dir_root, f"predictions_{dataset_name}.json")
-    if os.path.exists(results_file):
-        try:
-            with open(results_file, 'r') as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return True
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    status_file = os.path.join(output_dir_root, dataset_name + "_status.pkl")
-    if not (os.path.exists(status_file) and os.path.getsize(status_file) > 0):
-        return False
-    test_folder = os.path.join(dataset_dir, "test")
-    annotation_files = glob.glob(os.path.join(test_folder, "*_annotations.coco.json"))
-    if not annotation_files:
-        return False
-    try:
-        with open(annotation_files[0], 'r') as f:
-            annotations = json.load(f)
-        with open(status_file, "rb") as sf:
-            status_dict = pickle.load(sf)
-        if not isinstance(status_dict, dict) or not status_dict:
-            return False
-        images = annotations.get("images", [])
-        if not images:
-            return False
-        return all(status_dict.get(str(img["id"])) is True for img in images)
-    except (EOFError, pickle.UnpicklingError, ValueError, OSError, json.JSONDecodeError):
-        return False
-
-
 # cmd: python3 baseline/evaluate_qwen_local_custom_instruction.py --just_instructions --data_dir ./datasets/rf100-vl-fsod --model_name Qwen3-VL-30B-A3B-Instruct --save_dir results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20_gepa_multiclass_instrc --vllm --instruction_type gepa --instruction_path ../dspy-baselines/results/eccv26/gepa/Qwen3-VL-30B-A3B-Instruct/rf20gepa_REF/
 def main():
     """Main function to process all datasets with different modes."""
@@ -877,21 +834,6 @@ def main():
     logger.info(f"Found {len(all_dataset_dirs)} total datasets in {args.data_dir}. Will process all.")
     logger.info(f"Selected mode: {eval_mode_str}")
     logger.info(f"Using model: {args.model_name}")
-
-    pending_dataset_dirs = []
-    for d in all_dataset_dirs:
-        if is_dataset_fully_done(d, output_dir_root):
-            logger.info(f"Skipping dataset '{os.path.basename(d)}' — all test images already marked True in status file.")
-        else:
-            pending_dataset_dirs.append(d)
-            logger.info(f"Dataset '{os.path.basename(d)}' has pending images to process. Will include in this run.")
-    all_dataset_dirs = pending_dataset_dirs
-
-    if not all_dataset_dirs:
-        logger.info("No datasets remain to process — every dataset is already complete. Exiting before model load.")
-        return
-
-    logger.info(f"{len(all_dataset_dirs)} dataset(s) remain after skipping completed ones. Loading model now.")
 
     model, processor = load_qwen_model(args.model_name,args.vllm)
     assert(processor is not None)
